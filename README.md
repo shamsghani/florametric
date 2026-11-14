@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Dependencies: Zero](https://img.shields.io/badge/Dependencies-0%20(Pure%20Vanilla%20JS)-success.svg)](florametric.js)
-[![Performance: 60+ FPS](https://img.shields.io/badge/Performance-60%2B%20FPS%20(Hardware%20Bloom)-blue.svg)](#performance--hardware-accelerated-bloom)
+[![Performance: 60+ FPS](https://img.shields.io/badge/Performance-60%2B%20FPS%20(Hardware%20Bloom)-blue.svg)](#-performance)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-brightgreen.svg)](https://shamsghani.github.io/florametric/)
 
 **Florametric** is an open-source, zero-dependency generative mathematical engine for glowing, living ASCII flowers and plants. Every stem, leaf, sepal, petal floret, and drifting seed is simulated in real time using continuous mathematical formulations—growth logistic curves, harmonic Euler wind oscillations, polar coordinate phyllotaxis, and biological rules.
@@ -18,6 +18,40 @@ Designed for the modern web, terminal CLIs, blogs, and interactive creative codi
 ---
 
 ## ✨ Highlights & Features
+
+### 🧬 Born With a Genome
+Every plant is born with a heritable **genome** that it keeps for life. Each trait is a factor around `1.0` (colour genes are normalised to `[-1, 1]`):
+
+| Gene | Range | What it controls |
+| :--- | :--- | :--- |
+| `lifeFactor` | 0.70 – 1.40 | Longevity: how long the mature prime lasts, leaf & flower lifespans |
+| `vigor` | 0.80 – 1.25 | Metabolic growth rate (and a deeper green stem) |
+| `branching` | 0.25 – 1.50 | Number, angle and length of axillary branches |
+| `leafing` | 0.60 – 1.50 | Leaf cluster count and leaf size |
+| `flowering` | 0.65 – 1.40 | Flower size, bloom duration, branch-flower fertility, seed count |
+| `size` | 0.85 – 1.22 | Overall shoot height and flower scale |
+| `hue` / `saturation` / `lightness` | −1 – 1 | Petal colour (tulips & roses vary widely, sunflowers barely) |
+| `growthNoise` | 0.08 – 0.28 | How much growth speed wanders over time |
+| `shapeNoise` | 0.35 – 1.10 | Stem meander, leaf tilt, petal irregularity |
+| `windSensitivity` | 0.75 – 1.30 | Stem flexibility in the breeze |
+
+Seeds carry a **mutated copy of their parent's genome**, so lineages drift gradually over generations instead of jumping to unrelated plants.
+
+### 🌊 Noise-Driven Growth (No Two Plants Alike)
+Seeded **simplex noise** (smooth, coherent randomness rather than `Math.random()` jitter) is applied while the plant actually grows:
+* **Growth velocity** wanders smoothly over time but never reverses, so growth stays monotonic.
+* **Stem meander** is keyed to *absolute height*, so tissue that has already grown keeps its shape while the apex extends.
+* **Leaves** get individual emergence speeds and tilts; **petals** get per-individual length irregularity.
+* **Wind** comes from a travelling gust field: neighbouring plants bend together and gust fronts roll across the meadow.
+
+### 🔄 Rotated Glyph Rendering
+Stem, branch, leaf, grass and petal characters are **rotated to the local tangent** of the curve they belong to, and flower heads nod with the stem tip. Curves read as continuous strokes instead of stair-stepped `|` and `/` columns.
+
+### 🌱 Self-Seeding Meadow
+Plants are individuals, not loops. A flower that finishes **sets seed**, and the seeds fall and drift on the wind. Where they land, they may take root as **new plants in new spots**. A plant that reaches the end of its life **dies and is removed**. Competition keeps the meadow healthy:
+* a minimum spacing between seedlings;
+* a cap on any one species' share of the meadow;
+* occasional wind-borne seeds of other species.
 
 ### 🌸 100% Parametric & Mathematical Botany
 * **Zero Pre-Baked Art**: No static character templates or hardcoded ASCII art blocks. All anatomy is computed continuously from mathematical functions.
@@ -74,7 +108,7 @@ Plants are not static illustrations — they live, mature, reproduce, senesce, a
 * **Vegetative Growth ($\tau \in [0.25, 0.55)$)**: Stems elongate, leaves unfurl from tiny nascent buds (`maturity \in [0.08, 1.0]`), and secondary shoots branch out **bilaterally from both left and right axils**.
 * **Anthesis & Peak Bloom ($\tau \in [0.55, 1.05)$)**: Bounded Fibonacci seed discs form surrounded by radiant ray petals; full photosynthetic leaf vigor.
 * **Senescence & Wilting ($\tau \in [1.05, 1.35)$)**: Post-bloom aging begins: stem bows with turgor loss, petals droop and gently shed on the wind, and leaves wilt into warm autumn hues.
-* **Decay & Reseeding ($\tau \ge 1.40$)**: The plant decays into organic soil mulch and reseeds as a fresh young sprout with new DNA variation, keeping the meadow perpetually alive and dynamic.
+* **Death & Dispersal ($\tau \ge 1.40$)**: The plant decays into soil mulch and is removed. Its last seeds scatter; offspring sprout elsewhere with an inherited, slightly mutated genome. (Single-specimen embeds use `lifecycle: 'respawn'` and regrow in place instead.)
 * **Sunlight Revitalization**: Showering sunlight (`feed()`) on aging or wilting plants reverses senescence and revitalizes cellular vigor!
 
 ---
@@ -88,8 +122,8 @@ Tufts of meadow grass line the soil bed, each cycling through its own 4-stage bi
 
 ---
 
-### 🧬 Deterministic DNA Seeds & Genetic Variance
-Every specimen derives its morphology from a deterministic genetic PRNG seed. DNA parameters govern:
+### 🎲 Deterministic Seeds & Placement Variance
+On top of the genome, a deterministic PRNG seed places each individual's leaves, branches and timings:
 * **Stem Habit**: *Erect columnar, graceful weeping curve, S-curve, windswept lean, or angular zigzag*.
 * **Bilateral Axillary Branching**: Shoots emerge bilaterally from alternating left and right leaf axils with distinct angles and lengths.
 * **Continuous Leaf Unfurling**: Leaves emerge as nascent buds and expand smoothly as the shoot elongates (zero pop-in).
@@ -163,20 +197,49 @@ Include the script in your document `<head>` and use `<florametric-plant>` anywh
   garden.addPlant(550, { type: 'hibiscus', age: 0.85 });
   garden.addPlant(750, { type: 'iris', age: 1.0 });
 
-  // Hook into dandelion seed germination events
+  // Lifecycle events: seeds take root, old plants die
   garden.onSeedGerminate = (plant, x) => {
-    console.log(`Dandelion seed sprouted at X: ${x}!`);
+    console.log(`${plant.type} (generation ${plant.genome.generation}) sprouted at X: ${x}`);
   };
+  garden.onPlantDeath = (plant, x) => console.log(`${plant.type} at X: ${x} completed its life`);
 
   // Start 60 FPS simulation loop
   garden.start();
 </script>
 ```
 
+#### Choosing a Genome
+Plants get a random genome from their seed by default. Pass `genome` to set traits explicitly; anything you leave out is randomised from the seed:
+
+```javascript
+// A long-lived, bushy, pink-shifted rose
+garden.addPlant(300, {
+  type: 'rose',
+  seed: 2026,
+  genome: { lifeFactor: 1.35, branching: 1.4, hue: -0.6 }
+});
+
+// Inspect, breed and serialise genomes
+const g = Florametric.Genome.random('tulip', 7);
+const child = g.mutate(8);          // offspring: gradual drift, generation + 1
+console.log(child.toJSON());
+```
+
+#### Garden Options
+| Option | Default | Description |
+| :--- | :--- | :--- |
+| `lifecycle` | `'reproduce'` | `'reproduce'`: flowers set seed and offspring sprout in new spots. `'respawn'`: a dead plant regrows in place |
+| `seedGermination` | `0.12` | Chance that a fallen seed takes root |
+| `maxPlants` / `minPlants` | from width | Population ceiling and floor |
+| `maxSpeciesShare` | `0.3` | Largest share of the meadow one species may hold |
+| `immigration` | `true` | Occasional wind-borne seeds of random species |
+| `reducedMotion` | from `prefers-reduced-motion` | Calmer wind and slower sway |
+| `bloom` | `true` | Screen-space glow pass |
+
 ---
 
 ### 3. Static ASCII String Generator (For Terminal CLIs, READMEs & Discord)
-Generate plain text ASCII art for backend services, command-line interfaces, or terminal scripts:
+Generate plain text ASCII art for backend services, command-line interfaces, or terminal scripts. The whole plant is fitted into `cols × rows` with terminal-cell aspect correction, and rotated strokes are mapped to the nearest of `| / - \`:
 
 ```javascript
 const Florametric = require('./florametric.js');
@@ -223,15 +286,39 @@ Florametric features 10 biologically distinct plant species, each with unique st
 
 ---
 
-## ⚡ Performance: Hardware-Accelerated Bloom
+## 🏛️ Architecture
 
-In traditional Canvas 2D applications, applying `ctx.shadowBlur` to thousands of individual typographic characters forces the browser to perform thousands of CPU/GPU Gaussian blur passes per frame, creating severe frame-rate drops down to 13 FPS.
+`florametric.js` is a single zero-dependency file organised into layers. Each layer depends only on the layers above it:
 
-Florametric solves this via a **two-pass screen-space bloom pipeline**:
-1. **Sharp Fast Pass**: Glyphs are rasterized in a single draw call with `shadowBlur: 0` (~0.3ms).
-2. **Downscaled Bloom Buffer**: An offscreen canvas ($1/3$ resolution) captures the frame and blits back using `globalCompositeOperation = 'lighter'` (~0.2ms).
+| # | Layer | Responsibility |
+| :--- | :--- | :--- |
+| 1 | `PRNG`, `SimplexNoise`, colour utils | Deterministic randomness, coherent noise, HSL tinting |
+| 2 | `PALETTES` | Base colours per theme (`colorVariance` keeps themed palettes on-theme) |
+| 3 | `Genome` | Heritable traits, mutation, per-individual palette tinting |
+| 4 | `BotanicalSimulator` | Growth, member lifecycles (leaves, branches, flowers), noise |
+| 5 | `BotanicalArchitect`, `ProceduralFlowerRenderer` | Geometry → glyph lists `{ x, y, char, fg, size, rot }` |
+| 6 | `GlyphRenderer` / `GlyphAtlas`, `TextRasterizer` | Glyphs → canvas (sprite atlas, rotation) or plain text |
+| 7 | `WindField`, `GrassTuft`, `AsciiPlant`, `AsciiGarden` | The living, self-seeding scene |
+| 8 | `<florametric-plant>` | Web Component (pauses when scrolled off-screen) |
 
-**Result**: Locked **60–120 FPS** on desktop, low-power laptops, and mobile devices with over 5,000 glowing typographic marks per frame.
+---
+
+## ⚡ Performance
+
+Rotating text with `fillText` is a slow path in the browser: rotated glyphs bypass its glyph cache. Florametric instead rasterises each `(character, colour, size)` once into a **glyph sprite atlas** and blits sprites with `drawImage`, so rotated glyphs cost about the same as upright ones. Sprite sizes are bucketed and scaled on the GPU, so the atlas stays small.
+
+Measured in Chrome 157 on an Apple M1 Pro at DPR 2, with 3,340 glyphs in the meadow:
+
+| Path | ms / frame |
+| :--- | :--- |
+| `fillText` with rotation (naïve) | ~61 *(at 5,215 glyphs)* |
+| Glyph atlas with rotation (Florametric) | **5.8** |
+| Full frame: simulation, glyphs, bloom | **6.4** |
+
+Other techniques:
+* **Screen-space bloom:** one blur of a 1/3-scale copy per frame, instead of `shadowBlur` on every glyph.
+* **Only visible views animate:** hidden tabs stop their loops, and `<florametric-plant>` pauses while off-screen (IntersectionObserver).
+* **Clamped `dt`:** a backgrounded tab doesn't fast-forward the simulation when you return.
 
 ---
 
@@ -245,6 +332,9 @@ python test/test_botanical_math_invariants.py
 
 # Run dandelion physics, seed flight, and 1/20 germination probability suite
 node test/test_dandelion_mechanic.js
+
+# Run genome, growth-noise, glyph-rotation, text-export & self-seeding suite
+node test/test_genome_noise_rotation.js
 
 # Run rendering performance benchmark (60 frames across 8 mature specimens)
 node test/benchmark_render.js
