@@ -73,6 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
       initStudio();
     } else if (tabId === 'codex') {
       initCodex();
+    } else if (tabId === 'embed') {
+      initMeadowArchitect();
     }
   }
 
@@ -208,6 +210,24 @@ document.addEventListener('DOMContentLoaded', () => {
       seedWildflowerMeadow();
       showToast('Wildflower meadow planted!');
     });
+
+    const btnExport = document.getElementById('btn-export-meadow');
+    if (btnExport) {
+      btnExport.addEventListener('click', () => {
+        if (garden && garden.plants.length > 0) {
+          const currentSpecies = Array.from(new Set(garden.plants.map(p => p.plant.type)));
+          architectState.species = currentSpecies;
+          architectState.plantCount = garden.plants.length;
+          architectState.palette = garden.paletteName;
+          architectState.startTime = Date.now();
+        }
+        switchTab('embed');
+        if (typeof syncArchitectControlsFromState === 'function') {
+          syncArchitectControlsFromState();
+        }
+        showToast('Meadow configuration loaded into Architect! ⌛');
+      });
+    }
   }
 
   function seedWildflowerMeadow() {
@@ -617,7 +637,331 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // =========================================================================
-  // 6. GLOBAL NAVBAR CONTROLS & UTILITIES
+  // 6. PERSISTENT MEADOW ARCHITECT & CODE GENERATOR
+  // =========================================================================
+
+  const architectState = {
+    startTime: Date.now(),
+    speed: '24h',
+    plantCount: 7,
+    species: ['sunflower', 'rose', 'tulip', 'dandelion', 'iris', 'thistle', 'hibiscus'],
+    palette: 'botanical',
+    seed: 42,
+    timeShiftMs: 0,
+    format: 'webcomponent' // 'webcomponent' | 'vanilla' | 'url'
+  };
+
+  let architectPreviewGarden = null;
+  let architectInitialized = false;
+
+  const ALL_SPECIES_LIST = [
+    { id: 'sunflower', name: 'Sunflower', icon: '🌻' },
+    { id: 'rose', name: 'Rose', icon: '🌹' },
+    { id: 'tulip', name: 'Tulip', icon: '🌷' },
+    { id: 'dandelion', name: 'Dandelion', icon: '🌾' },
+    { id: 'hibiscus', name: 'Hibiscus', icon: '🌺' },
+    { id: 'iris', name: 'Iris', icon: '🪻' },
+    { id: 'thistle', name: 'Thistle', icon: '🪡' },
+    { id: 'marigold', name: 'Marigold', icon: '🏵️' },
+    { id: 'daffodil', name: 'Daffodil', icon: '🌼' },
+    { id: 'flytrap', name: 'Flytrap', icon: '🪴' }
+  ];
+
+  function formatIsoLocal(timestamp) {
+    const d = new Date(timestamp);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function syncArchitectControlsFromState() {
+    const inputT0 = document.getElementById('gen-t0');
+    if (inputT0) inputT0.value = formatIsoLocal(architectState.startTime);
+
+    const selSpeed = document.getElementById('gen-speed');
+    if (selSpeed) selSpeed.value = architectState.speed;
+
+    const sCount = document.getElementById('gen-count');
+    if (sCount) {
+      sCount.value = architectState.plantCount;
+      document.getElementById('val-gen-count').textContent = `${architectState.plantCount} plants`;
+    }
+
+    const selPal = document.getElementById('gen-palette');
+    if (selPal) selPal.value = architectState.palette;
+
+    const inputSeed = document.getElementById('gen-seed');
+    if (inputSeed) inputSeed.value = architectState.seed;
+
+    renderSpeciesChips();
+    updateArchitectPreview();
+  }
+
+  function updateArchitectPreview() {
+    const previewCanvas = document.getElementById('gen-preview-canvas');
+    if (!previewCanvas) return;
+
+    const rect = previewCanvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    previewCanvas.width = (rect.width || 420) * dpr;
+    previewCanvas.height = (rect.height || 260) * dpr;
+    const ctx = previewCanvas.getContext('2d');
+    if (ctx) ctx.scale(dpr, dpr);
+    previewCanvas.cssWidth = rect.width || 420;
+    previewCanvas.cssHeight = rect.height || 260;
+
+    const targetTime = architectState.startTime + (Date.now() - architectState.startTime) + architectState.timeShiftMs;
+
+    if (!architectPreviewGarden) {
+      architectPreviewGarden = Florametric.createPersistentMeadow(previewCanvas, {
+        startTime: architectState.startTime,
+        speed: architectState.speed,
+        plantCount: architectState.plantCount,
+        species: architectState.species,
+        palette: architectState.palette,
+        seed: architectState.seed,
+        wind: 0.65
+      });
+    } else {
+      architectPreviewGarden.startTime = architectState.startTime;
+      architectPreviewGarden.effectiveSpeed = Florametric.parseTimeSpeed(architectState.speed);
+      architectPreviewGarden.masterSeed = architectState.seed;
+      architectPreviewGarden.paletteName = architectState.palette;
+      architectPreviewGarden.syncToTime(targetTime);
+    }
+
+    // Stats
+    const summary = architectPreviewGarden.getMeadowSummary(targetTime);
+    const statElapsed = document.getElementById('gen-stat-elapsed');
+    if (statElapsed) statElapsed.textContent = `Elapsed: ${summary.elapsedHours} hrs (${summary.elapsedDays} days)`;
+
+    const statStage = document.getElementById('gen-stat-stage');
+    if (statStage) statStage.textContent = `Stage: ${summary.stage}`;
+
+    const statAvgAge = document.getElementById('gen-stat-avg-age');
+    if (statAvgAge) statAvgAge.textContent = `Avg Age: ${summary.averageAge}`;
+
+    updateCodeSnippetOutput();
+  }
+
+  function updateCodeSnippetOutput() {
+    const codeEl = document.getElementById('gen-code-output');
+    if (!codeEl) return;
+
+    const spString = architectState.species.join(',');
+    const origin = window.location.origin || 'https://shamsghani.github.io';
+    const path = window.location.pathname.replace(/\/index\.html$/, '') || '/florametric';
+    const baseUrl = `${origin}${path}`.replace(/\/+$/, '');
+
+    const configToken = Florametric.encodeMeadowConfig({
+      startTime: architectState.startTime,
+      speed: architectState.speed,
+      plantCount: architectState.plantCount,
+      species: architectState.species,
+      palette: architectState.palette,
+      seed: architectState.seed
+    });
+
+    if (architectState.format === 'webcomponent') {
+      codeEl.textContent = `<!-- 1. Include Florametric Engine in your <head> or <body> -->
+<script src="${baseUrl}/florametric.js"></script>
+
+<!-- 2. Drop in your Persistent Time-Anchored Meadow -->
+<florametric-meadow
+  start-time="${architectState.startTime}"
+  speed="${architectState.speed}"
+  plant-count="${architectState.plantCount}"
+  species="${spString}"
+  palette="${architectState.palette}"
+  seed="${architectState.seed}"
+  interactive>
+</florametric-meadow>`;
+    } else if (architectState.format === 'vanilla') {
+      codeEl.textContent = `<!-- Meadow Canvas Container -->
+<canvas id="ascii-meadow" style="width: 100%; height: 380px; display: block; background: #050508;"></canvas>
+
+<script src="${baseUrl}/florametric.js"></script>
+<script>
+  // Starts at ${new Date(architectState.startTime).toISOString()}, advances continuously
+  const meadow = Florametric.createPersistentMeadow('#ascii-meadow', {
+    startTime: ${architectState.startTime},
+    speed: '${architectState.speed}',
+    plantCount: ${architectState.plantCount},
+    species: [${architectState.species.map(s => `'${s}'`).join(', ')}],
+    palette: '${architectState.palette}',
+    seed: ${architectState.seed},
+    wind: 0.65
+  });
+</script>`;
+    } else if (architectState.format === 'url') {
+      const shareUrl = `${baseUrl}/#meadow=${configToken}`;
+      codeEl.textContent = `${shareUrl}`;
+    }
+  }
+
+  function renderSpeciesChips() {
+    const wrap = document.getElementById('gen-species-pills');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    ALL_SPECIES_LIST.forEach(sp => {
+      const isSelected = architectState.species.includes(sp.id);
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `species-chip ${isSelected ? 'active' : ''}`;
+      chip.innerHTML = `<span class="chip-icon">${sp.icon}</span> <span>${sp.name}</span>`;
+      chip.addEventListener('click', () => {
+        if (architectState.species.includes(sp.id)) {
+          if (architectState.species.length > 1) {
+            architectState.species = architectState.species.filter(s => s !== sp.id);
+          } else {
+            showToast('Meadow must contain at least one species!');
+            return;
+          }
+        } else {
+          architectState.species.push(sp.id);
+        }
+        renderSpeciesChips();
+        updateArchitectPreview();
+      });
+      wrap.appendChild(chip);
+    });
+  }
+
+  function initMeadowArchitect() {
+    if (architectInitialized) {
+      updateArchitectPreview();
+      return;
+    }
+    architectInitialized = true;
+
+    // 1. Initial values
+    architectState.startTime = Date.now();
+    const inputT0 = document.getElementById('gen-t0');
+    if (inputT0) {
+      inputT0.value = formatIsoLocal(architectState.startTime);
+      inputT0.addEventListener('change', e => {
+        const val = new Date(e.target.value).getTime();
+        if (!isNaN(val)) {
+          architectState.startTime = val;
+          document.querySelectorAll('.preset-pill').forEach(p => p.classList.remove('active'));
+          updateArchitectPreview();
+        }
+      });
+    }
+
+    // Now button
+    const btnNow = document.getElementById('btn-t0-now');
+    if (btnNow) {
+      btnNow.addEventListener('click', () => {
+        architectState.startTime = Date.now();
+        if (inputT0) inputT0.value = formatIsoLocal(architectState.startTime);
+        document.querySelectorAll('.preset-pill').forEach(p => p.classList.remove('active'));
+        const nowPill = document.querySelector('.preset-pill[data-offset="0"]');
+        if (nowPill) nowPill.classList.add('active');
+        updateArchitectPreview();
+        showToast('Epoch reset to current time! ⏱️');
+      });
+    }
+
+    // Preset pills (-12h, -1d, -3d, -1w)
+    document.querySelectorAll('.preset-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('.preset-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        const offset = parseInt(pill.dataset.offset, 10);
+        architectState.startTime = Date.now() + offset;
+        if (inputT0) inputT0.value = formatIsoLocal(architectState.startTime);
+        updateArchitectPreview();
+      });
+    });
+
+    // Speed
+    const selSpeed = document.getElementById('gen-speed');
+    if (selSpeed) {
+      selSpeed.addEventListener('change', e => {
+        architectState.speed = e.target.value;
+        updateArchitectPreview();
+      });
+    }
+
+    // Count slider
+    const sCount = document.getElementById('gen-count');
+    if (sCount) {
+      sCount.addEventListener('input', e => {
+        const val = parseInt(e.target.value, 10);
+        architectState.plantCount = val;
+        document.getElementById('val-gen-count').textContent = `${val} plants`;
+        updateArchitectPreview();
+      });
+    }
+
+    // Palette
+    const selPalette = document.getElementById('gen-palette');
+    if (selPalette) {
+      selPalette.addEventListener('change', e => {
+        architectState.palette = e.target.value;
+        updateArchitectPreview();
+      });
+    }
+
+    // Seed
+    const inputSeed = document.getElementById('gen-seed');
+    if (inputSeed) {
+      inputSeed.addEventListener('input', e => {
+        architectState.seed = parseInt(e.target.value, 10) || 42;
+        updateArchitectPreview();
+      });
+    }
+    const btnRandSeed = document.getElementById('btn-gen-random-seed');
+    if (btnRandSeed) {
+      btnRandSeed.addEventListener('click', () => {
+        architectState.seed = Math.floor(Math.random() * 100000);
+        if (inputSeed) inputSeed.value = architectState.seed;
+        updateArchitectPreview();
+        playChime(660);
+      });
+    }
+
+    // Time scrub testing pills (Simulate Revisit)
+    document.querySelectorAll('.scrub-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('.scrub-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        architectState.timeShiftMs = parseInt(pill.dataset.shift, 10) || 0;
+        updateArchitectPreview();
+        playChime(520 + Math.random() * 100);
+      });
+    });
+
+    // Code format switcher tabs
+    document.querySelectorAll('.exp-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.exp-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        architectState.format = tab.dataset.format;
+        updateCodeSnippetOutput();
+      });
+    });
+
+    // Copy Code button
+    const btnCopyCode = document.getElementById('btn-copy-gen-code');
+    if (btnCopyCode) {
+      btnCopyCode.addEventListener('click', () => {
+        const codeEl = document.getElementById('gen-code-output');
+        if (codeEl) {
+          navigator.clipboard.writeText(codeEl.textContent).then(() => {
+            showToast('Code snippet copied to clipboard! 📋');
+            playChime(784);
+          });
+        }
+      });
+    }
+
+    renderSpeciesChips();
+    updateArchitectPreview();
+  }
+
+  // =========================================================================
+  // 7. GLOBAL NAVBAR CONTROLS & UTILITIES
   // =========================================================================
 
   const timeSpeeds = [
@@ -701,12 +1045,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 2400);
   }
 
-  // Start in Garden Mode (or URL hash if specified)
-  const initialTab = window.location.hash ? window.location.hash.replace('#', '') : 'garden';
-  if (['garden', 'studio', 'codex', 'embed'].includes(initialTab)) {
-    switchTab(initialTab);
+  // Start in Garden Mode, URL Hash Meadow, or Tab
+  if (window.location.hash.startsWith('#meadow=')) {
+    const token = window.location.hash.replace('#meadow=', '');
+    const decoded = Florametric.decodeMeadowConfig(token);
+    switchTab('garden');
+    if (decoded) {
+      setTimeout(() => {
+        if (garden) garden.clear();
+        const persistent = Florametric.createPersistentMeadow(gardenCanvas, decoded);
+        window.garden = persistent;
+        garden = persistent;
+        const summary = persistent.getMeadowSummary();
+        showToast(`Loaded Persistent Meadow! Started ${summary.elapsedHours}h ago (${summary.stage}) 🌱`);
+      }, 100);
+    }
   } else {
-    initGarden();
+    const initialTab = window.location.hash ? window.location.hash.replace('#', '') : 'garden';
+    if (['garden', 'studio', 'codex', 'embed'].includes(initialTab)) {
+      switchTab(initialTab);
+    } else {
+      initGarden();
+    }
   }
 
   // Automatic sunlight demo trigger if URL query param present

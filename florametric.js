@@ -2394,20 +2394,25 @@
     start() {
       if (this.isRunning) return;
       this.isRunning = true;
-      let lastTime = performance.now();
+      let lastTime = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
 
       const loop = (now) => {
         if (!this.isRunning) return;
-        const dt = Math.min(0.1, (now - lastTime) / 1000);
-        lastTime = now;
+        const nowMs = now || (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+        const dt = Math.min(0.1, (nowMs - lastTime) / 1000);
+        lastTime = nowMs;
 
         this.update(dt);
         this.render();
 
-        requestAnimationFrame(loop);
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(loop);
+        }
       };
 
-      requestAnimationFrame(loop);
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(loop);
+      }
     }
 
     stop() {
@@ -2684,7 +2689,287 @@
   }
 
   // =========================================================================
-  // 8. CUSTOM WEB COMPONENTS
+  // 8. TIME-ANCHORED PERSISTENT MEADOW ENGINE (t0 EPOCH & DETERMINISTIC GROWTH)
+  // =========================================================================
+
+  function deterministicGenSeed(seed, k) {
+    if (!k) return seed;
+    let h = (seed ^ (k * 2654435761)) >>> 0;
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return ((h ^ (h >>> 16)) >>> 0) % 1000000;
+  }
+
+  function parseTimeSpeed(val) {
+    if (typeof val === 'number') return val;
+    if (!val) return 40 / 86400; // default to 24-hour real-time
+    const s = String(val).toLowerCase().trim();
+    if (s === '24h' || s === 'realtime-day' || s === 'day') return 40 / 86400;
+    if (s === '3d' || s === 'realtime-3days') return 40 / (3 * 86400);
+    if (s === '7d' || s === 'realtime-week' || s === 'week') return 40 / (7 * 86400);
+    if (s === '30d' || s === 'realtime-month' || s === 'month') return 40 / (30 * 86400);
+    if (s === '1h' || s === 'fast-hour' || s === 'hour') return 40 / 3600;
+    if (s.endsWith('x')) return parseFloat(s) || 1.0;
+    const parsed = parseFloat(s);
+    return isNaN(parsed) ? 1.0 : parsed;
+  }
+
+  function encodeMeadowConfig(config) {
+    try {
+      const compact = {
+        t0: typeof config.startTime === 'number' ? config.startTime : new Date(config.startTime || Date.now()).getTime(),
+        spd: config.speed !== undefined ? config.speed : '24h',
+        n: config.plantCount || 7,
+        sp: config.species || ['sunflower', 'rose', 'tulip', 'dandelion', 'iris'],
+        pal: config.palette || 'botanical',
+        seed: config.seed !== undefined ? config.seed : 42,
+        w: config.wind !== undefined ? config.wind : 0.6,
+        gr: config.grass !== false ? 1 : 0
+      };
+      const json = JSON.stringify(compact);
+      if (typeof btoa !== 'undefined') {
+        return btoa(encodeURIComponent(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      } else if (typeof Buffer !== 'undefined') {
+        return Buffer.from(json).toString('base64url');
+      }
+      return encodeURIComponent(json);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function decodeMeadowConfig(str) {
+    try {
+      let json = '';
+      if (typeof atob !== 'undefined') {
+        let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+        while (b64.length % 4) b64 += '=';
+        json = decodeURIComponent(atob(b64));
+      } else if (typeof Buffer !== 'undefined') {
+        json = Buffer.from(str, 'base64url').toString('utf8');
+      } else {
+        json = decodeURIComponent(str);
+      }
+      const data = JSON.parse(json);
+      return {
+        startTime: data.t0,
+        speed: data.spd,
+        plantCount: data.n,
+        species: data.sp,
+        palette: data.pal,
+        seed: data.seed,
+        wind: data.w,
+        grass: data.gr !== 0
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * createPersistentMeadow:
+   * Instantiates an AsciiGarden that anchors to a starting timestamp t0.
+   * Calculates the exact growth stage of each plant based on elapsed real-world time (Date.now() - t0).
+   * Ensures identical plants are preserved across sessions and continue their biological journey!
+   */
+  function createPersistentMeadow(target, options = {}) {
+    let config = { ...options };
+    if (typeof options === 'string') {
+      const decoded = decodeMeadowConfig(options);
+      if (decoded) config = { ...decoded };
+    } else if (options.config) {
+      const decoded = decodeMeadowConfig(options.config);
+      if (decoded) config = { ...decoded, ...options };
+    }
+
+    let canvas = target;
+    if (typeof target === 'string' && typeof document !== 'undefined') {
+      canvas = document.querySelector(target);
+    }
+    if (!canvas && typeof document !== 'undefined') {
+      canvas = document.createElement('canvas');
+      document.body.appendChild(canvas);
+    }
+
+    const startTime = typeof config.startTime === 'number'
+      ? config.startTime
+      : new Date(config.startTime || Date.now()).getTime();
+
+    const speedVal = config.speed !== undefined ? config.speed : (config.timeSpeed || config.timescale || '24h');
+    const effectiveSpeed = parseTimeSpeed(speedVal);
+    const masterSeed = config.seed !== undefined ? config.seed : 42;
+    const palette = config.palette || 'botanical';
+    const wind = config.wind !== undefined ? config.wind : 0.6;
+    const plantCount = Math.max(1, config.plantCount || 7);
+    const speciesList = Array.isArray(config.species)
+      ? config.species
+      : (typeof config.species === 'string'
+        ? config.species.split(',').map(s => s.trim()).filter(Boolean)
+        : ['sunflower', 'rose', 'tulip', 'dandelion', 'iris', 'thistle', 'hibiscus']);
+
+    const garden = new AsciiGarden(canvas, {
+      wind,
+      palette,
+      timeSpeed: effectiveSpeed,
+      grass: config.grass !== false
+    });
+
+    garden.isPersistent = true;
+    garden.startTime = startTime;
+    garden.effectiveSpeed = effectiveSpeed;
+    garden.masterSeed = masterSeed;
+    garden.persistentConfig = {
+      ...config,
+      startTime,
+      speed: speedVal,
+      plantCount,
+      species: speciesList,
+      seed: masterSeed
+    };
+
+    /**
+     * Calculate and sync exact mathematical plant growth states to targetTimestamp
+     */
+    garden.syncToTime = function(targetTimestamp = Date.now()) {
+      this.clear();
+      const w = this.cssWidth || (this.canvas ? this.canvas.clientWidth : 800) || 800;
+      const rng = new PRNG(masterSeed);
+
+      const elapsedMs = Math.max(0, targetTimestamp - startTime);
+      const elapsedSec = elapsedMs / 1000;
+      const simSec = elapsedSec * effectiveSpeed;
+
+      const plants = [];
+      for (let i = 0; i < plantCount; i++) {
+        const xFrac = (i + 0.5) / plantCount + rng.range(-0.03, 0.03);
+        const xPos = Math.max(30, Math.min(w - 30, xFrac * w));
+        const sp = speciesList[i % speciesList.length];
+        const initialAge = 0.04 + rng.range(0.0, 0.04);
+        const initialSeed = Math.floor(rng.range(1000, 999999));
+        const metabolicRate = rng.range(0.85, 1.15);
+        const height = rng.range(270, 370);
+        const curvature = rng.range(-0.35, 0.35);
+
+        // Accumulated age in 20n lifecycle units (0 -> 1.0 growth, 1.0 -> 21.0 mature, 21.0 -> 23.5 senescence)
+        const agingRatePerSec = 0.025 * metabolicRate;
+        const totalAge = initialAge + (simSec * agingRatePerSec);
+
+        const cycleLength = 23.5;
+        const completedCycles = Math.floor(totalAge / cycleLength);
+        const currentAge = totalAge % cycleLength;
+        const currentSeed = deterministicGenSeed(initialSeed, completedCycles);
+
+        const plant = this.addPlant(xPos, {
+          type: sp,
+          age: currentAge,
+          height,
+          curvature,
+          seed: currentSeed,
+          metabolicRate
+        });
+
+        // Sync member subcycles (flower anthesis flushes & leaf turnover)
+        if (plant.simulator && plant.simulator.members) {
+          const m = plant.simulator.members;
+          // Flower subcycle flush sync
+          if (m.apicalFlower) {
+            const flower = m.apicalFlower;
+            const waveTotal = flower.lifespan + flower.wiltTimer + flower.resproutTimer;
+            if (currentAge < 1.0) {
+              const bloomFrac = smoothstep(0.42, 0.88, currentAge);
+              flower.bloom = bloomFrac;
+              flower.state = currentAge > 0.45 ? 'blooming' : (currentAge > 0.18 ? 'opening' : 'bud');
+            } else if (currentAge <= 21.0) {
+              // Mature prime flushes initiate after vegetative maturity is achieved
+              const timeToMature = Math.max(0, (1.0 - initialAge) / agingRatePerSec);
+              const matureSimSec = Math.max(0, simSec - timeToMature);
+              const phase = matureSimSec % waveTotal;
+              if (phase < flower.lifespan) {
+                flower.state = 'blooming';
+                flower.bloom = 1.0;
+              } else if (phase < flower.lifespan + flower.wiltTimer) {
+                flower.state = 'wilting';
+                flower.bloom = Math.max(0.2, 1.0 - (phase - flower.lifespan) / flower.wiltTimer);
+              } else {
+                flower.state = 'dormant';
+                flower.bloom = 0.0;
+              }
+            } else {
+              flower.state = 'wilting';
+              flower.bloom = Math.max(0.0, 1.0 - (currentAge - 21.0) / 2.5);
+            }
+          }
+
+          if (m.leaves && m.leaves.length > 0) {
+            m.leaves.forEach((lf, lIdx) => {
+              const leafTotal = (lf.lifespan || 22) + 6.0 + 8.0;
+              const lPhase = (simSec + lIdx * 6.7) % leafTotal;
+              if (currentAge < 0.3) {
+                lf.state = 'bud';
+              } else if (currentAge <= 21.0) {
+                if (lPhase < (lf.lifespan || 22)) {
+                  lf.state = 'mature';
+                } else if (lPhase < (lf.lifespan || 22) + 6.0) {
+                  lf.state = 'wilting';
+                } else {
+                  lf.state = 'dead';
+                }
+              } else {
+                lf.state = 'wilting';
+              }
+            });
+          }
+        }
+
+        plants.push({ plant, x: xPos, totalAge, completedCycles });
+      }
+
+      // Sync grass tufts
+      if (this.grass && this.grass.length > 0) {
+        this.grass.forEach((tuft) => {
+          tuft.life = (tuft.life + simSec * 0.033) % 1.0;
+        });
+      }
+
+      return plants;
+    };
+
+    garden.getMeadowSummary = function(targetTimestamp = Date.now()) {
+      const elapsedMs = Math.max(0, targetTimestamp - startTime);
+      const elapsedHours = (elapsedMs / (1000 * 3600)).toFixed(1);
+      const elapsedDays = (elapsedMs / (1000 * 86400)).toFixed(2);
+      const avgAge = this.plants.length > 0
+        ? this.plants.reduce((sum, p) => sum + p.plant.age, 0) / this.plants.length
+        : 0;
+      let stage = 'Sprouting';
+      if (avgAge > 21.0) stage = 'Senescence';
+      else if (avgAge >= 1.0) stage = 'Mature Prime (Flourishing)';
+      else if (avgAge > 0.45) stage = 'Blooming Anthesis';
+      else if (avgAge > 0.15) stage = 'Vegetative Growth';
+
+      return {
+        elapsedMs,
+        elapsedHours,
+        elapsedDays,
+        averageAge: parseFloat(avgAge.toFixed(2)),
+        stage,
+        plantCount: this.plants.length
+      };
+    };
+
+    garden.fastForwardTo = function(targetTimestamp) {
+      this.syncToTime(targetTimestamp);
+    };
+
+    // Initialize to current time & start live loop
+    garden.syncToTime(Date.now());
+    garden.start();
+
+    return garden;
+  }
+
+  // =========================================================================
+  // 9. CUSTOM WEB COMPONENTS
   // =========================================================================
 
   if (typeof customElements !== 'undefined') {
@@ -2727,6 +3012,73 @@
       class AsciiPlantElement extends FlorametricPlantElement { }
       customElements.define('ascii-plant', AsciiPlantElement);
     }
+
+    /**
+     * <florametric-meadow>: Drop-in Time-Anchored Persistent Garden Element
+     */
+    class FlorametricMeadowElement extends HTMLElement {
+      connectedCallback() {
+        const startTimeAttr = this.getAttribute('start-time') || this.getAttribute('epoch');
+        const startTime = startTimeAttr
+          ? (isNaN(Number(startTimeAttr)) ? new Date(startTimeAttr).getTime() : Number(startTimeAttr))
+          : Date.now();
+        const speed = this.getAttribute('speed') || this.getAttribute('timescale') || '24h';
+        const plantCount = parseInt(this.getAttribute('plant-count') || this.getAttribute('plants-count') || '7', 10);
+        const speciesAttr = this.getAttribute('species') || this.getAttribute('plants');
+        const species = speciesAttr ? speciesAttr.split(',').map(s => s.trim()).filter(Boolean) : null;
+        const palette = this.getAttribute('palette') || 'botanical';
+        const wind = parseFloat(this.getAttribute('wind') || '0.6');
+        const grass = this.getAttribute('grass') !== 'false';
+        const seed = parseInt(this.getAttribute('seed') || '42', 10);
+        const configAttr = this.getAttribute('config');
+
+        this.style.display = 'block';
+        this.style.background = '#050508';
+        this.style.width = this.style.width || '100%';
+        this.style.height = this.style.height || '360px';
+        this.style.position = 'relative';
+        this.style.overflow = 'hidden';
+
+        const canvas = document.createElement('canvas');
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.style.display = 'block';
+        this.appendChild(canvas);
+
+        const meadowGarden = createPersistentMeadow(canvas, {
+          startTime,
+          speed,
+          plantCount,
+          species,
+          palette,
+          wind,
+          grass,
+          seed,
+          config: configAttr
+        });
+        this._garden = meadowGarden;
+      }
+
+      disconnectedCallback() {
+        if (this._garden) this._garden.stop();
+      }
+
+      fastForward(targetTimestamp) {
+        if (this._garden) this._garden.fastForwardTo(targetTimestamp);
+      }
+
+      getSummary() {
+        return this._garden ? this._garden.getMeadowSummary() : null;
+      }
+    }
+
+    if (!customElements.get('florametric-meadow')) {
+      customElements.define('florametric-meadow', FlorametricMeadowElement);
+    }
+    if (!customElements.get('ascii-meadow')) {
+      class AsciiMeadowElement extends FlorametricMeadowElement { }
+      customElements.define('ascii-meadow', AsciiMeadowElement);
+    }
   }
 
   return {
@@ -2736,6 +3088,11 @@
     BotanicalSimulator,
     BotanicalArchitect,
     ProceduralFlowerRenderer,
+    createPersistentMeadow,
+    encodeMeadowConfig,
+    decodeMeadowConfig,
+    parseTimeSpeed,
+    deterministicGenSeed,
     PALETTES,
     SPECIES: ['sunflower', 'hibiscus', 'iris', 'thistle', 'marigold', 'daffodil', 'rose', 'dandelion', 'tulip', 'flytrap'],
     generateString: (options) => {
