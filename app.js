@@ -257,7 +257,24 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
+    initStudioGrass();
     startStudioLoop();
+  }
+
+  let studioGrass = [];
+  function initStudioGrass() {
+    studioGrass = [];
+    if (!studioCanvas) return;
+    const w = studioCanvas.cssWidth || 600;
+    const h = studioCanvas.cssHeight || 600;
+    const groundY = h - 60;
+    const originX = w / 2;
+    for (let gx = originX - 200; gx <= originX + 200; gx += 24) {
+      if (Math.abs(gx - originX) < 18) continue;
+      const seed = Math.floor(gx * 73 + 19);
+      const initLife = (Math.abs(gx) * 0.017) % 1.0;
+      studioGrass.push(new AsciiPlants.GrassTuft(gx, groundY, seed, initLife));
+    }
   }
 
   function resizeStudioCanvas() {
@@ -269,6 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
     studioCtx.scale(dpr, dpr);
     studioCanvas.cssWidth = rect.width || 600;
     studioCanvas.cssHeight = rect.height || 600;
+    initStudioGrass();
   }
 
   function startStudioLoop() {
@@ -302,14 +320,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // Soil line
     ctx.save();
     ctx.fillStyle = '#225528';
-    ctx.shadowColor = '#00ff66';
-    ctx.shadowBlur = 4;
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
     for (let gx = originX - 220; gx <= originX + 220; gx += 16) {
       ctx.fillText('-', gx, groundY + 12);
     }
     ctx.restore();
+
+    // Render living meadow grass at specimen base
+    if (studioGrass.length > 0) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const pal = studioPlant.getPalette();
+      studioGrass.forEach(g => {
+        g.update(0.016, 1.0);
+        const glyphs = g.generateGlyphs(studioTime, studioWind, studioPlant.pointer, pal);
+        glyphs.forEach(glyph => {
+          ctx.font = `${glyph.size}px monospace`;
+          ctx.fillStyle = glyph.fg;
+          ctx.fillText(glyph.char, glyph.x, glyph.y);
+        });
+      });
+      ctx.restore();
+    }
 
     // Render plant
     studioPlant.renderToCanvas(ctx, originX, groundY, studioTime, studioWind);
@@ -377,7 +411,8 @@ document.addEventListener('DOMContentLoaded', () => {
     sAge.addEventListener('input', e => {
       const val = parseFloat(e.target.value);
       studioPlant.setAge(val);
-      document.getElementById('val-age').textContent = `${Math.round(val * 100)}%`;
+      const label = val > 1.05 ? `${Math.round(val * 100)}% (Wilt)` : (val > 0.85 ? `${Math.round(val * 100)}% (Bloom)` : `${Math.round(val * 100)}%`);
+      document.getElementById('val-age').textContent = label;
     });
 
     sBloom.addEventListener('input', e => {
@@ -432,6 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Studio Feed Button
     document.getElementById('btn-studio-feed').addEventListener('click', () => {
       studioPlant.feed(0.35);
+      studioGrass.forEach(g => g.feed(0.5));
       // Accelerate growth smoothly
       studioPlant.setAge(Math.min(1.0, studioPlant.age + 0.15));
       if (studioPlant.bloom !== null) {
