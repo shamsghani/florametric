@@ -44,8 +44,37 @@ Seeded **simplex noise** (smooth, coherent randomness rather than `Math.random()
 * **Leaves** get individual emergence speeds and tilts; **petals** get per-individual length irregularity.
 * **Wind** comes from a travelling gust field: neighbouring plants bend together and gust fronts roll across the meadow.
 
-### 🔄 Rotated Glyph Rendering
-Stem, branch, leaf, grass and petal characters are **rotated to the local tangent** of the curve they belong to, and flower heads nod with the stem tip. Curves read as continuous strokes instead of stair-stepped `|` and `/` columns.
+### 🌿 Species Botany: Real Shoots, Real Flowers
+Every species follows a botanical profile from a [study of the real plants](docs/BOTANY.md).
+* **Shoots:**
+  * Rose canes zigzag at every node and carry hooked prickles.
+  * Dandelion scapes are smooth, hollow and whippy in the wind.
+  * Sunflower stalks are stout, hairy and nod at maturity.
+  * Thistle stems carry spiny wings and hibiscus stems turn woody.
+  * Daffodil scapes are two-edged with a swan neck, so the flower faces sideways.
+  * Scapes such as tulip and daffodil never branch.
+* **Leaves:**
+  * Heart-shaped (sunflower) and oval (hibiscus) blades.
+  * Compound leaves with leaflets (rose), and finely divided ones (marigold).
+  * Spiny-lobed thistle leaves.
+  * Sword fans (iris), straps (daffodil), broad wavy leaves (tulip).
+  * Lion's-tooth rosettes (dandelion) and flytrap trap rosettes.
+* **Flowers:**
+  * Sunflower: Fibonacci ray florets around a spiral seed disc.
+  * Rose: a spiral of cupped petals.
+  * Hibiscus: a staminal column with anthers.
+  * Bearded iris: standards above falls.
+  * Daffodil: a trumpet corona.
+  * Tulip: a goblet.
+  * Marigold: bicolour pompons.
+  * Thistle: a spiny urn with a purple brush.
+  * Dandelion: a yellow head that becomes a seed clock.
+  * Flytrap: a white umbel.
+
+  Buds are the same petals folded closed and still green, so opening is one continuous movement.
+
+### 🔄 ASCII Glyph Language with Rotation
+Strokes pick the ASCII character closest to their direction (`|`, `/`, `-`, `\`) and are only nudged by the small leftover angle, so curves stay smooth without losing the ASCII look. Petals and leaves are outlined in `( )` brackets and filled with per-species textures (`@ # *` hibiscus, `% & @` marigold, `{ ( %` rose, `! %` tulip). Stems weave in `%`, `#` and `:`, and flower heads nod with the stem tip.
 
 ### 🌱 Self-Seeding Meadow
 Plants are individuals, not loops. A flower that finishes **sets seed**, and the seeds fall and drift on the wind. Where they land, they may take root as **new plants in new spots**. A plant that reaches the end of its life **dies and is removed**. Competition keeps the meadow healthy:
@@ -338,6 +367,9 @@ node test/test_dandelion_mechanic.js
 
 # Run genome, growth-noise, glyph-rotation, text-export & self-seeding suite
 node test/test_genome_noise_rotation.js
+
+# Run species botany suite (shoot straightness, textures, flexibility, flower identity)
+node test/test_botany_profiles.js
 
 # Run rendering performance benchmark (60 frames across 8 mature specimens)
 node test/benchmark_render.js
