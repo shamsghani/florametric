@@ -104,6 +104,7 @@ class GeneticPlantSimulator:
                 })
 
         flower_scale = (0.7 + len(active_leaves) * 0.08) * self.flower_scale_mod
+        flower_scale = max(0.5, min(1.45, flower_scale))
         
         return {
             'stem_nodes': stem_nodes,

@@ -9,6 +9,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <script>
+    window.__ERRORS__ = [];
+    window.addEventListener('error', e => {
+      const err = `ERROR: ${e.message} at ${e.filename}:${e.lineno}`;
+      console.error(err);
+      window.__ERRORS__.push(err);
+    });
+  </script>
 </head>
 <body>
 
@@ -36,6 +44,9 @@
     </nav>
 
     <div class="nav-actions">
+      <button id="btn-clock-toggle" class="action-btn" title="Cycle Biological Time Speed">
+        <span class="icon">⏱️</span> <span class="lbl">Time: 1x</span>
+      </button>
       <button id="btn-nourish-toggle" class="action-btn" title="Toggle Sunlight / Plant Food Nourish Mode">
         <span class="icon">☀️</span> <span class="lbl">Nourish: Off</span>
       </button>
@@ -58,10 +69,11 @@
       <!-- Garden Overlay Prompt -->
       <div class="garden-hud">
         <div class="hud-pill">
-          <span class="pulse-dot"></span> Click anywhere on the soil line to sow a new plant &bull; Move cursor to interact
+          <span class="pulse-dot"></span> Click soil to sow &bull; Click Dandelions to blow seeds &bull; Pass of time blooms buds naturally &bull; Shower Sunlight ☀️
         </div>
         <div class="garden-controls">
           <button id="btn-sunlight-burst" class="hud-btn primary">Shower Sunlight ☀️</button>
+          <button id="btn-clock-cycle" class="hud-btn" title="Cycle Biological Time Passing">Time: 1x ⏱️</button>
           <button id="btn-clear-garden" class="hud-btn">Clear Garden</button>
           <button id="btn-flower-all" class="hud-btn">Bloom All ✿</button>
           <button id="btn-preset-wildflower" class="hud-btn">Plant Wildflower Meadow</button>
