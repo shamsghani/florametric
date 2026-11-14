@@ -16,6 +16,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let studioTime = 0;
   let studioWind = 0.60;
   let studioAnimId = null;
+  let studioBloomCanvas = null;
+  let studioBloomCtx = null;
 
   let garden = null;
   const gardenCanvas = document.getElementById('garden-canvas');
@@ -81,14 +83,29 @@ document.addEventListener('DOMContentLoaded', () => {
   function initGarden() {
     garden = new AsciiPlants.AsciiGarden(gardenCanvas, {
       wind: 0.65,
-      palette: 'botanical'
+      palette: 'botanical',
+      timeSpeed: 1.0
     });
+    window.garden = garden;
+
+    garden.onDandelionBlow = (plant, x, y) => {
+      playChime(784); // G5
+      setTimeout(() => playChime(988), 120); // B5
+      setTimeout(() => playChime(1175), 240); // D6
+      showToast('Dandelion seeds blown! Floating on the wind... 🌾 (5% soil germination chance)');
+    };
+
+    garden.onSeedGerminate = (plant, x) => {
+      playChime(523);
+      setTimeout(() => playChime(659), 120);
+      showToast('A dandelion parachute seed sprouted in the soil! 🌱');
+    };
 
     // Populate initial meadow with diverse botanical species
     seedWildflowerMeadow();
     garden.start();
 
-    // Click or tap to sow or feed
+    // Click or tap to sow, feed, or interact
     let isMouseDown = false;
 
     gardenCanvas.addEventListener('mousedown', e => {
@@ -111,17 +128,25 @@ document.addEventListener('DOMContentLoaded', () => {
       const clickX = e.clientX - rect.left;
       const clickY = e.clientY - rect.top;
 
+      // 1. Check if clicking on dandelion flower head to blow seeds
+      if (garden.checkDandelionBlow(clickX, clickY)) {
+        return;
+      }
+
+      // 2. Feed Sunlight / Plant Food mode
       if (nourishMode) {
-        // Feed Sunlight / Plant Food mode
         garden.nourishAt(clickX, clickY, 240);
         playChime(520 + Math.random() * 260);
-      } else {
-        // Plant seed if near soil line (lower 25% of canvas) or general sowing
-        const groundY = gardenCanvas.height - 50;
+        return;
+      }
+
+      // 3. Plant seed if clicking near soil line (lower portion of canvas)
+      const groundY = (garden.cssHeight || rect.height) - 50;
+      if (clickY >= groundY - 70) {
         const speciesList = AsciiPlants.SPECIES;
         const randomSpecies = speciesList[Math.floor(Math.random() * speciesList.length)];
         
-        const newPlant = garden.addPlant(clickX, {
+        garden.addPlant(clickX, {
           type: randomSpecies,
           age: 0.05,
           height: 280 + Math.random() * 120,
@@ -130,18 +155,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         playChime(320 + Math.random() * 200);
-
-        let growthTimer = setInterval(() => {
-          if (newPlant.age < 1.0) {
-            newPlant.setAge(newPlant.age + 0.025);
-            if (newPlant.age >= 1.0) {
-              newPlant.setAge(1.0);
-              clearInterval(growthTimer);
-              playChime(580 + Math.random() * 150);
-            }
-          }
-        }, 50);
+        showToast(`Sowed new ${randomSpecies} seed 🌱`);
+        return;
       }
+
+      // 4. Clicked in open air: shower gentle ambient pollen
+      garden.nourishAt(clickX, clickY, 90);
+      playChime(659);
+    }
+
+    // Garden HUD buttons
+    const btnHudClock = document.getElementById('btn-clock-cycle');
+    if (btnHudClock) {
+      btnHudClock.addEventListener('click', () => cycleTimeSpeed());
     }
 
     // Shower Sunlight burst button
@@ -187,7 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function seedWildflowerMeadow() {
     garden.clear();
     const width = garden.cssWidth || 800;
-    const species = ['sunflower', 'hibiscus', 'iris', 'thistle', 'marigold', 'daffodil', 'rose', 'dandelion'];
+    const species = ['sunflower', 'dandelion', 'hibiscus', 'iris', 'thistle', 'marigold', 'daffodil', 'rose'];
     const count = Math.max(5, Math.floor(width / 130));
 
     for (let i = 0; i < count; i++) {
@@ -287,6 +313,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Render plant
     studioPlant.renderToCanvas(ctx, originX, groundY, studioTime, studioWind);
+
+    // Fast Screen-Space Bloom Pass (velvety glowing halo with zero per-glyph lag)
+    if (!studioBloomCanvas) {
+      studioBloomCanvas = document.createElement('canvas');
+      studioBloomCtx = studioBloomCanvas.getContext('2d');
+    }
+    const bw = Math.max(10, Math.floor(w / 3));
+    const bh = Math.max(10, Math.floor(h / 3));
+    if (studioBloomCanvas.width !== bw || studioBloomCanvas.height !== bh) {
+      studioBloomCanvas.width = bw;
+      studioBloomCanvas.height = bh;
+    }
+    studioBloomCtx.clearRect(0, 0, bw, bh);
+    studioBloomCtx.drawImage(studioCanvas, 0, 0, bw, bh);
+
+    ctx.save();
+    ctx.globalAlpha = 0.40;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(studioBloomCanvas, 0, 0, w, h);
+    ctx.restore();
 
     // Update real-time statistics
     const simData = studioPlant.simulator.simulate(studioPlant.age, studioPlant.bloom);
@@ -517,6 +563,41 @@ document.addEventListener('DOMContentLoaded', () => {
   // 6. GLOBAL NAVBAR CONTROLS & UTILITIES
   // =========================================================================
 
+  const timeSpeeds = [
+    { label: 'Time: 1x ⏱️', navLabel: '1x ⏱️', val: 1.0 },
+    { label: 'Time: 3x ⏩', navLabel: '3x ⏩', val: 3.0 },
+    { label: 'Time: 8x 🚀', navLabel: '8x 🚀', val: 8.0 },
+    { label: 'Time: ⏸️ Paused', navLabel: 'Paused ⏸️', val: 0.0 }
+  ];
+  let timeSpeedIndex = 0;
+
+  function cycleTimeSpeed() {
+    timeSpeedIndex = (timeSpeedIndex + 1) % timeSpeeds.length;
+    const cur = timeSpeeds[timeSpeedIndex];
+    if (garden) garden.timeSpeed = cur.val;
+
+    const btnClock = document.getElementById('btn-clock-toggle');
+    if (btnClock) {
+      btnClock.querySelector('.lbl').textContent = `Time: ${cur.navLabel}`;
+      btnClock.style.borderColor = cur.val > 1.0 ? 'var(--accent-gold)' : '';
+      btnClock.style.background = cur.val > 1.0 ? 'rgba(255, 190, 40, 0.15)' : '';
+    }
+
+    const btnHudClock = document.getElementById('btn-clock-cycle');
+    if (btnHudClock) {
+      btnHudClock.textContent = cur.label;
+      btnHudClock.style.borderColor = cur.val > 1.0 ? 'var(--accent-gold)' : '';
+    }
+
+    showToast(`Biological Clock: ${cur.label}`);
+    playChime(440 + cur.val * 35);
+  }
+
+  const btnClock = document.getElementById('btn-clock-toggle');
+  if (btnClock) {
+    btnClock.addEventListener('click', cycleTimeSpeed);
+  }
+
   const btnNourish = document.getElementById('btn-nourish-toggle');
   btnNourish.addEventListener('click', () => {
     nourishMode = !nourishMode;
@@ -576,6 +657,19 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       const burstBtn = document.getElementById('btn-sunlight-burst');
       if (burstBtn) burstBtn.click();
+    }, 450);
+  }
+
+  // Automatic dandelion blow demo trigger if URL query param present
+  if (window.location.search.includes('blow_dandelion=1')) {
+    setTimeout(() => {
+      if (garden) {
+        const dand = garden.plants.find(p => p.plant.type === 'dandelion');
+        if (dand) {
+          const head = dand.plant.getHeadPosition(dand.x, garden.cssHeight - 50);
+          garden.blowDandelion(dand.plant, head.x, head.y);
+        }
+      }
     }, 450);
   }
 });
