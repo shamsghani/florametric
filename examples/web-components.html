@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Florametric · Web components</title>
+  <style>
+    body { margin: 0; padding: 32px 24px; font-family: system-ui, sans-serif; background: #0b0f0c; color: #d7e8d2; }
+    h2 { font-size: 16px; margin: 28px 0 10px; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    florametric-plant { border-radius: 12px; }
+    florametric-garden, florametric-meadow { border-radius: 12px; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <h2>&lt;florametric-plant&gt;: one specimen per element</h2>
+  <div class="row">
+    <florametric-plant type="sunflower"></florametric-plant>
+    <florametric-plant type="rose" wind="0" pollen="false"></florametric-plant>
+    <florametric-plant type="dandelion" preset="calm"></florametric-plant>
+    <florametric-plant type="tulip" rotation="false" glow="false" palette="phosphor"></florametric-plant>
+  </div>
+
+  <h2>&lt;florametric-garden&gt;: a row of plants, every option as an attribute</h2>
+  <florametric-garden species="daffodil,iris,marigold,hibiscus,thistle" count="7"
+    reproduction="false" particles="false" style="height:320px"></florametric-garden>
+
+  <h2>&lt;florametric-meadow&gt;: anchored to a start time, grows in real time</h2>
+  <florametric-meadow speed="24h" plant-count="6" species="sunflower,rose,tulip,iris"
+    seed="42" style="height:300px"></florametric-meadow>
+
+  <script src="../florametric.js"></script>
+</body>
+</html>

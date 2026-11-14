@@ -234,4 +234,46 @@ const run = (garden, seconds, dt = 0.25) => { for (let t = 0; t < seconds; t += 
   console.log('  ✓ createPersistentMeadow passes feature options through');
 }
 
+// -------------------------------------------------------------
+// 8. Plants added already grown appear as their age implies (no restart from buds)
+// -------------------------------------------------------------
+{
+  const g = new F.AsciiGarden(null);
+  const p = g.addPlant(400, { type: 'sunflower', age: 1.0, seed: 8 });
+  const before = p.simulator.simulate(p.age, null, 0, 0);
+  g.update(0.016);
+  const after = p.simulator.simulate(p.age, null, 0, 0);
+  assert(p.effectiveBloom > 0.9, `A mature plant starts in bloom (bloom ${p.effectiveBloom.toFixed(2)})`);
+  const size = sim => sim.leaves.reduce((a, l) => a + l.scale, 0);
+  assert(size(after) > size(before) * 0.9, 'Leaves keep their size on the first frame');
+  const seedling = g.addPlant(200, { type: 'sunflower', age: 0.45, seed: 9 });
+  g.update(0.016);
+  assert(seedling.simulator.members.apicalFlower.state === 'bud', 'A young plant still starts with a bud');
+  console.log('  ✓ Plants added fully grown start in bloom; seedlings still start as buds');
+}
+
+// -------------------------------------------------------------
+// 9. Helpers fit every grown plant inside its box (no flower cut off at the top)
+// -------------------------------------------------------------
+{
+  let worst = Infinity, who = '';
+  for (const h of [260, 360]) {
+    for (const type of F.SPECIES) {
+      for (let seed = 1; seed <= 6; seed++) {
+        const g = F.plant(mockCanvas(300, h), { type, seed: seed * 977, age: 3, autoStart: false });
+        for (const gl of g.collectGlyphs()) {
+          const top = gl.y - (gl.size || 10) / 2;
+          if (top < worst) { worst = top; who = `${type}#${seed} in ${h}px`; }
+        }
+      }
+    }
+  }
+  assert(worst >= 0, `Every plant fits its box (worst top edge ${worst.toFixed(1)}px: ${who})`);
+  const g = F.garden(mockCanvas(900, 280), { count: 10, age: 3, autoStart: false });
+  const seeds = g.plants.map(p => p.plant.seed);
+  const again = F.garden(mockCanvas(900, 280), { count: 10, age: 3, autoStart: false });
+  assert.deepStrictEqual(again.plants.map(p => p.plant.seed), seeds, 'Refitting keeps seeds deterministic');
+  console.log(`  ✓ Helpers fit every species inside the box (worst top edge ${worst.toFixed(1)}px)`);
+}
+
 console.log('\nALL INTEGRATION API TESTS PASSED! 🔌');

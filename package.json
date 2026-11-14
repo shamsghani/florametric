@@ -1,0 +1,44 @@
+{
+  "name": "florametric",
+  "version": "2.0.0",
+  "description": "Living, procedural ASCII flowers and plants for the web. Zero dependencies; every trait can be toggled.",
+  "main": "florametric.js",
+  "types": "florametric.d.ts",
+  "unpkg": "florametric.js",
+  "jsdelivr": "florametric.js",
+  "files": [
+    "florametric.js",
+    "florametric.d.ts",
+    "README.md",
+    "docs/BOTANY.md"
+  ],
+  "sideEffects": true,
+  "scripts": {
+    "test": "node test/run-all.js",
+    "start": "python3 -m http.server 8080"
+  },
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "flowers",
+    "plants",
+    "generative-art",
+    "procedural",
+    "canvas",
+    "web-components",
+    "creative-coding",
+    "animation"
+  ],
+  "homepage": "https://shamsghani.github.io/florametric/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shamsghani/florametric.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shamsghani/florametric/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  }
+}

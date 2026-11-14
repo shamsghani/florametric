@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Florametric · Static plants in cards</title>
+  <style>
+    body { margin: 0; padding: 40px 24px; font-family: system-ui, sans-serif; background: #f4f1ea; color: #1f2a1f; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    p.lead { margin: 0 0 28px; color: #5b6655; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; max-width: 1100px; }
+    .card { border-radius: 14px; overflow: hidden; background: #fff; box-shadow: 0 6px 24px rgba(0,0,0,.08); }
+    .card.dark { background: #0d1410; color: #d7e8d2; }
+    .art { height: 260px; }
+    .meta { padding: 14px 16px 18px; }
+    .meta b { display: block; margin-bottom: 4px; }
+    .meta span { font-size: 13px; opacity: .7; }
+    code { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Static ASCII plants</h1>
+  <p class="lead">Drawn once, transparent background, no animation loop: zero CPU after the first frame.</p>
+
+  <div class="grid">
+    <!-- 1. Web component: static preset, transparent background, classic upright ASCII -->
+    <div class="card">
+      <florametric-plant class="art" type="tulip" preset="static" animate="false" background="transparent"
+        glow="false" variation="false" grass="false" style="width:100%;height:260px;display:block"></florametric-plant>
+      <div class="meta"><b>Tulip</b><span><code>&lt;florametric-plant preset="static" animate="false"&gt;</code></span></div>
+    </div>
+
+    <!-- 2. Florametric.render() into a container -->
+    <div class="card">
+      <div class="art" id="rose"></div>
+      <div class="meta"><b>Rose</b><span><code>Florametric.render('#rose', …)</code></span></div>
+    </div>
+
+    <!-- 3. Same call on a dark card, with glow -->
+    <div class="card dark">
+      <div class="art" id="sunflower"></div>
+      <div class="meta"><b>Sunflower</b><span>render() on a dark card, glow on</span></div>
+    </div>
+
+    <!-- 4. Classic upright ASCII (rotation off) in the amber palette -->
+    <div class="card dark">
+      <div class="art" id="iris"></div>
+      <div class="meta"><b>Iris</b><span>rotation: false · palette: amber</span></div>
+    </div>
+  </div>
+
+  <script src="../florametric.js"></script>
+  <script>
+    Florametric.render('#rose', { type: 'rose', background: 'transparent', glow: false, grass: false, seed: 7 });
+    Florametric.render('#sunflower', { type: 'sunflower', background: 'transparent', seed: 3 });
+    Florametric.render('#iris', { type: 'iris', background: 'transparent', rotation: false, palette: 'amber', seed: 12 });
+  </script>
+</body>
+</html>
