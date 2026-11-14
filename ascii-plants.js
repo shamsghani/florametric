@@ -384,6 +384,235 @@
     daffodil: 8, rose: 55, dandelion: 6, tulip: 70, flytrap: 12
   };
 
+  // -------------------------------------------------------------------------
+  // Drawing primitives: glyphs aligned to the curve they belong to
+  // -------------------------------------------------------------------------
+
+  // Deterministic 0..1 hash for per-node / per-petal variation
+  function hash01(a, b = 0) {
+    return (Math.imul((a | 0) * 374761393 + (b | 0) * 668265263, 1274126177) >>> 0) / 4294967296;
+  }
+
+  /**
+   * ASCII glyph for a stroke heading in screen direction theta: the nearest of
+   * - \ | / (using their real slopes in a monospace cell, ~59° for the diagonals),
+   * plus the small residual rotation that keeps curves smooth.
+   */
+  const DIR_GLYPHS = [['-', 0], ['\\', 1.03], ['|', Math.PI / 2], ['/', 2.11], ['-', Math.PI]];
+  function asciiFor(theta) {
+    let a = theta % Math.PI;
+    if (a < 0) a += Math.PI;
+    let best = DIR_GLYPHS[0];
+    let bestD = Infinity;
+    for (let i = 0; i < DIR_GLYPHS.length; i++) {
+      const d = Math.abs(a - DIR_GLYPHS[i][1]);
+      if (d < bestD) { bestD = d; best = DIR_GLYPHS[i]; }
+    }
+    return { char: best[0], rot: a - best[1] };
+  }
+
+  // ASCII glyph for an upward stroke leaning r radians clockwise from vertical
+  function stemGlyph(r) {
+    return asciiFor(r - Math.PI / 2);
+  }
+
+  /**
+   * Resample a polyline at an even spacing and emit one glyph per sample.
+   * Styles:
+   *  - default: direction-matched ASCII (| / - \) with a small residual rotation
+   *  - bracket: -1 / 1 -> '(' / ')' turned along the path (petal & leaf outlines)
+   *  - chars:  cycle through texture characters, kept upright (fills, hatching)
+   *  - char:   one fixed glyph turned along the path
+   * fg may be a colour or a function of the path fraction (0 at start, 1 at end).
+   */
+  function strokeAlong(out, pts, fg, size, opts = {}) {
+    if (!pts || pts.length < 2) return;
+    const spacing = opts.spacing || size * 0.82;
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    if (total < 0.5) return;
+    let carry = Math.min(spacing * 0.5, total * 0.5);
+    let walked = 0;
+    let n = opts.phase || 0;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) continue;
+      const theta = Math.atan2(dy, dx);
+      let char;
+      let rot;
+      if (opts.chars) {
+        char = null;
+        rot = opts.align === 'tangent' ? theta + Math.PI / 2 : 0;
+      } else if (opts.bracket) {
+        char = opts.bracket < 0 ? '(' : ')';
+        rot = theta + Math.PI / 2;
+      } else if (opts.char) {
+        char = opts.char;
+        rot = theta + Math.PI / 2;
+      } else {
+        const g = asciiFor(theta);
+        char = g.char;
+        rot = g.rot;
+      }
+      while (carry <= len) {
+        const t = carry / len;
+        const f = (walked + carry) / total;
+        out.push({
+          x: a.x + dx * t,
+          y: a.y + dy * t,
+          char: char || opts.chars[n % opts.chars.length],
+          fg: typeof fg === 'function' ? fg(f) : fg,
+          size,
+          rot
+        });
+        n++;
+        carry += spacing;
+      }
+      carry -= len;
+      walked += len;
+    }
+  }
+
+  // Lamina width profiles w(u), u = 0 at the base, 1 at the tip
+  const LAMINA = {
+    lanceolate: u => Math.pow(Math.sin(Math.PI * u), 0.9) * (1 - 0.3 * u),
+    ovate: u => Math.pow(Math.sin(Math.PI * Math.pow(u, 0.8)), 0.85),
+    obovate: u => Math.pow(Math.sin(Math.PI * Math.pow(u, 1.35)), 0.75),
+    cordate: u => Math.pow(Math.sin(Math.PI * Math.pow(u, 0.6)), 0.7),
+    linear: u => (u < 0.8 ? 0.9 + 0.1 * Math.sin(u * 4) : Math.max(0, (1 - u) / 0.2)),
+    spindle: u => Math.pow(Math.sin(Math.PI * u), 1.1),
+    tepal: u => Math.pow(Math.sin(Math.PI * Math.pow(u, 0.72)), 0.65),
+    kidney: u => Math.pow(Math.sin(Math.PI * Math.pow(u, 0.9)), 0.55)
+  };
+
+  /**
+   * Draw a lamina (leaf blade, petal, tepal, sepal or bract) with rotated strokes.
+   * Local frame: the midrib leaves (x, y) along `angle`; curl bends it sideways.
+   * o: { edge, fill, rib, hatch, size, serrate, curl, ribTo, texture, edgeStyle }
+   * Outlines are drawn with ( ) brackets, hatching with texture characters.
+   */
+  function drawLamina(out, x, y, angle, L, W, shape, o = {}) {
+    if (L < 1) return;
+    const size = o.size || 10;
+    const curl = o.curl || 0;
+    const ca = Math.cos(angle);
+    const sa = Math.sin(angle);
+    const steps = Math.max(3, Math.ceil(L / (size * 0.55)));
+    const point = (u, v) => {
+      const along = u * L;
+      const side = curl * L * u * u + v;
+      return { x: x + ca * along - sa * side, y: y + sa * along + ca * side };
+    };
+    const w = u => W * shape(u);
+
+    for (const side of [-1, 1]) {
+      const edge = [];
+      for (let i = 0; i <= steps; i++) {
+        const u = i / steps;
+        edge.push(point(u, side * w(u)));
+      }
+      strokeAlong(out, edge, o.edge, size, o.edgeStyle === 'line' ? {} : { bracket: side });
+
+      // Serrated margin: small teeth angled toward the tip
+      if (o.serrate) {
+        for (let i = 2; i < steps; i += 3) {
+          const u = i / steps;
+          const p = point(u, side * w(u) * 1.04);
+          out.push({ x: p.x, y: p.y, char: "'", fg: o.edge, size: size * 0.8, rot: angle + side * (Math.PI / 2 - 0.7) + Math.PI / 2 });
+        }
+      }
+
+      // Hatching follows the blade's shape (fills broad petals with colour)
+      for (let k = 1; k <= (o.hatch || 0); k++) {
+        const frac = k / ((o.hatch || 0) + 1);
+        const line = [];
+        for (let i = 0; i <= steps; i++) {
+          const u = i / steps;
+          line.push(point(u, side * w(u) * frac));
+        }
+        strokeAlong(out, line, o.fill || o.edge, size * 0.9, { chars: o.texture || [':', '%', '*'], phase: k * 2 + (side > 0 ? 1 : 0) });
+      }
+    }
+
+    if (o.rib) {
+      const rib = [];
+      const ribTo = o.ribTo || 0.9;
+      for (let i = 0; i <= steps; i++) rib.push(point((i / steps) * ribTo, 0));
+      strokeAlong(out, rib, o.rib, size * 0.85);
+    }
+  }
+
+  // =========================================================================
+  // BOTANICAL PROFILES — real-world shoot & flower traits per species
+  // (see docs/BOTANY.md for the study these numbers come from)
+  // =========================================================================
+
+  const BOTANY = {
+    sunflower: {
+      shoot: { straightness: 0.92, kink: 0.02, internode: 30, meander: 0.3, habitAmp: 0.3, flex: 0.55, width: 8, taper: 0.55, texture: 'hairy', nod: 0.5, neck: 8, tint: { hue: 6, sat: -0.12, light: 0.04 } },
+      branch: { max: 2, angle: [0.45, 0.8], straightness: 0.85, kink: 0.03, upturn: 0.55, width: 3 },
+      leaf: { form: 'cordate', length: 46, width: 0.62, petiole: 0.32, serrate: true, droop: 0.35 }
+    },
+    hibiscus: {
+      shoot: { straightness: 0.7, kink: 0.12, internode: 26, meander: 0.5, habitAmp: 0.7, flex: 0.7, width: 6, taper: 0.45, texture: 'woody', nod: 0.15, neck: 4, tint: { hue: -14, sat: -0.22, light: -0.06 } },
+      branch: { max: 3, angle: [0.5, 1.0], straightness: 0.65, kink: 0.14, upturn: 0.35, width: 3 },
+      leaf: { form: 'ovate', length: 36, width: 0.5, petiole: 0.18, serrate: true, droop: 0.15 }
+    },
+    iris: {
+      shoot: { straightness: 0.97, kink: 0.01, internode: 60, meander: 0.15, habitAmp: 0.15, flex: 0.6, width: 3, taper: 0.2, texture: 'scape', nod: 0.05, neck: 0, tint: { hue: 28, sat: -0.2, light: 0.02 } },
+      branch: { max: 1, angle: [0.35, 0.5], straightness: 0.9, kink: 0.02, upturn: 0.7, width: 2 },
+      leaf: { form: 'sword', basal: true }
+    },
+    thistle: {
+      shoot: { straightness: 0.78, kink: 0.07, internode: 18, meander: 0.45, habitAmp: 0.5, flex: 0.65, width: 6, taper: 0.5, texture: 'winged', nod: 0.1, neck: 3, tint: { hue: 4, sat: -0.15, light: 0.05 } },
+      branch: { max: 3, angle: [0.35, 0.7], straightness: 0.75, kink: 0.08, upturn: 0.6, width: 2 },
+      leaf: { form: 'spinyLobed', length: 40, width: 0.36, petiole: 0, serrate: false, droop: 0.1 }
+    },
+    marigold: {
+      shoot: { straightness: 0.75, kink: 0.1, internode: 16, meander: 0.4, habitAmp: 0.5, flex: 0.8, width: 4, taper: 0.4, texture: 'ridged', nod: 0.05, neck: 2, tint: { hue: -20, sat: -0.08, light: -0.04, mix: 'crimson', mixAmt: 0.22 } },
+      branch: { max: 3, angle: [0.55, 1.0], straightness: 0.7, kink: 0.1, upturn: 0.5, width: 2 },
+      leaf: { form: 'pinnateFine', length: 34, width: 0.16, petiole: 0.1, serrate: true, droop: 0.1 }
+    },
+    daffodil: {
+      shoot: { straightness: 0.95, kink: 0.0, internode: 80, meander: 0.2, habitAmp: 0.2, flex: 0.9, width: 3, taper: 0.1, texture: 'twoEdged', nod: 0.0, neck: 16, tint: { hue: 18, sat: -0.18, light: 0.0 } },
+      branch: { max: 0 },
+      leaf: { form: 'strap', basal: true }
+    },
+    rose: {
+      shoot: { straightness: 0.45, kink: 0.22, internode: 22, meander: 0.55, habitAmp: 0.8, flex: 0.6, width: 5, taper: 0.35, texture: 'thorny', nod: 0.1, neck: 3, tint: { hue: -10, sat: -0.05, light: -0.05, mix: 'dark', mixAmt: 0.16 } },
+      branch: { max: 3, angle: [0.6, 1.1], straightness: 0.45, kink: 0.24, upturn: 0.1, width: 2 },
+      leaf: { form: 'pinnate', length: 40, width: 0.3, petiole: 0.12, serrate: true, droop: 0.1 }
+    },
+    dandelion: {
+      shoot: { straightness: 0.97, kink: 0.0, internode: 100, meander: 0.25, habitAmp: 0.55, flex: 1.35, width: 2.5, taper: 0.1, texture: 'smooth', nod: 0.1, neck: 4, tint: { hue: 10, sat: -0.25, light: 0.1 } },
+      branch: { max: 0 },
+      leaf: { form: 'rosette', basal: true }
+    },
+    tulip: {
+      shoot: { straightness: 0.96, kink: 0.0, internode: 100, meander: 0.2, habitAmp: 0.35, flex: 0.75, width: 5, taper: 0.15, texture: 'smooth', nod: 0.08, neck: 3, tint: { hue: 24, sat: -0.22, light: 0.02 } },
+      branch: { max: 0 },
+      leaf: { form: 'broad', basal: true }
+    },
+    flytrap: {
+      shoot: { straightness: 0.95, kink: 0.02, internode: 50, meander: 0.2, habitAmp: 0.2, flex: 1.0, width: 2, taper: 0.2, texture: 'smooth', nod: 0.0, neck: 0, tint: { hue: 0, sat: 0, light: 0.02 } },
+      branch: { max: 0 },
+      leaf: { form: 'traps', basal: true }
+    }
+  };
+
+  function botanyOf(type) {
+    return BOTANY[type] || BOTANY.sunflower;
+  }
+
+  // Young buds are green and colour up as they mature (exact petal colour at full bloom)
+  function ripen(col, bloom, palette) {
+    return mixColor(palette.stem, col, smoothstep(0.08, 0.45, bloom));
+  }
+
   class Genome {
     constructor(traits = {}) {
       this.species = traits.species || 'sunflower';
@@ -463,11 +692,16 @@
       }
 
       // Stems vary subtly with vigour: vigorous plants are a deeper, richer green
-      const stemLight = (this.vigor - 1.0) * -0.10 * v + this.lightness * 0.03 * v;
-      const stemHue = this.hue * 6 * v;
+      // Species stem colour (glaucous iris & tulip, pale dandelion, reddish rose &
+      // marigold, woody hibiscus) on top of the individual's vigour and hue genes
+      const st = botanyOf(this.species).shoot.tint || {};
+      const stemLight = (this.vigor - 1.0) * -0.10 * v + this.lightness * 0.03 * v + (st.light || 0) * v;
+      const stemHue = this.hue * 6 * v + (st.hue || 0) * v;
+      const stemSat = (st.sat || 0) * v;
+      const speciesMix = (c) => (st.mix && baseFlowers[st.mix] ? mixColor(c, baseFlowers[st.mix], (st.mixAmt || 0) * v, 16) : c);
       const tinted = Object.assign({}, base, {
-        stem: tintColor(base.stem, stemHue, 0, stemLight),
-        stemDark: tintColor(base.stemDark, stemHue, 0, stemLight),
+        stem: speciesMix(tintColor(base.stem, stemHue, stemSat, stemLight)),
+        stemDark: speciesMix(tintColor(base.stemDark, stemHue, stemSat, stemLight)),
         flowers: Object.assign({}, base.flowers, { [this.species]: flowers })
       });
       this._paletteCache.set(base.id, tinted);
@@ -518,9 +752,11 @@
       this.geneticHabit = g.habit;
       this.geneticBendAmp = rng.range(14, 42);
       this.geneticHeightMod = rng.range(0.94, 1.06) * g.size;
-      this.geneticMaxBranches = clamp(Math.round(rng.choice([0, 1, 1, 2, 2, 3]) * g.branching), 0, 3);
-      this.geneticBranchAngles = [rng.range(0.42, 0.88), rng.range(0.52, 0.96), rng.range(0.48, 0.90)]
-        .map(a => clamp(a * (0.8 + 0.2 * g.branching), 0.3, 1.1));
+      const bp = botanyOf(this.type).branch;
+      this.geneticMaxBranches = clamp(Math.round(rng.choice([0, 1, 1, 2, 2, 3]) * g.branching), 0, bp.max !== undefined ? bp.max : 3);
+      const [aLo, aHi] = bp.angle || [0.42, 0.9];
+      this.geneticBranchAngles = [rng.range(aLo, aHi), rng.range(aLo, aHi), rng.range(aLo, aHi)]
+        .map(a => clamp(a * (0.8 + 0.2 * g.branching), 0.3, 1.2));
       this.geneticBranchLengths = [rng.range(0.32, 0.58), rng.range(0.28, 0.52), rng.range(0.24, 0.46)]
         .map(l => l * (0.85 + 0.15 * g.branching));
       this.geneticHeadTilt = rng.range(-0.38, 0.38);
@@ -540,6 +776,23 @@
       }
 
       this.initMembers();
+    }
+
+    /** Stable per-individual 0..1 value (petal irregularity, facing side, nod direction). */
+    variant() {
+      return (Math.imul(this.seed | 0, 2654435761) >>> 0) / 4294967296;
+    }
+
+    /**
+     * Whether a dandelion shows its seed clock (vs. the yellow flower): the head flowers
+     * for the first part of its bloom, then closes and reopens as the clock.
+     */
+    isSeedClock(bloomOverride = null, bloom = 1) {
+      if (this.type !== 'dandelion') return false;
+      const af = this.members && this.members.apicalFlower;
+      if (bloomOverride !== null || !af || af.state === 'dormant') return bloom > 0.35;
+      if (af.state === 'blooming') return af.age > af.lifespan * 0.45;
+      return af.state === 'wilting';
     }
 
     /** Swap in an edited genome while keeping the seed-driven placement. */
@@ -975,15 +1228,38 @@
         shootHeight = Math.max(16, shootHeight * (1.0 - senescence * 0.22));
       }
 
-      // 1. Stem Spine Spline
-      const stemSegments = Math.max(6, Math.floor(shootHeight / 9));
+      // 1. Stem spine, integrated upward from the base in fixed steps and keyed to absolute
+      //    height (grown tissue keeps its shape while the apex extends). The species
+      //    profile decides how straight, node-kinked (zigzag), jagged and sinuous it is.
+      const sh = botanyOf(this.type).shoot;
+      const STEP = 8;
+      const nSeg = Math.max(6, Math.ceil(shootHeight / STEP));
       const stemNodes = [];
       const dirMult = this.geneticHabit.includes('left') ? -1 : 1;
+      const kinkSign = (this.seed & 1) ? 1 : -1;
+      const nodDir = this.variant() < 0.5 ? -1 : 1;
+      const response = 0.35 + 0.65 * (1 - sh.straightness);
+      const neckAmt = (sh.neck || 0) * smoothstep(0.45, 1.0, growthAge);
+      let heading = 0;
+      let sx = 0;
+      let prevY = 0;
 
-      for (let i = 0; i <= stemSegments; i++) {
-        const t = i / stemSegments;
+      for (let i = 0; i <= nSeg; i++) {
+        const y = Math.min(i * STEP, shootHeight);
+        const t = y / shootHeight;
+        if (i > 0) {
+          const node = Math.floor(y / sh.internode);
+          const zig = sh.kink * (0.6 + 0.8 * hash01(this.seed, node)) * (node % 2 === 0 ? 1 : -1) * kinkSign;
+          const jag = noise.noise2(y / 13, 9.1) * (1 - sh.straightness) * 0.45 * g.shapeNoise;
+          const meander = noise.fbm2(y / 85, 4.2, 2) * sh.meander * 0.3 * g.shapeNoise;
+          // Straight species ease toward the new direction; jagged ones snap to it at nodes
+          heading = lerp(heading, zig + jag + meander, response);
+          sx += Math.sin(heading) * (y - prevY);
+        }
+        prevY = y;
+
+        // Genome habit, expressed only as far as the species allows
         let dx = 0;
-
         if (this.geneticHabit === 'erect') {
           dx = Math.sin(t * Math.PI) * 8 * dirMult;
         } else if (this.geneticHabit.includes('curved')) {
@@ -995,21 +1271,20 @@
         } else if (this.geneticHabit === 'zigzag') {
           dx = Math.sin(t * Math.PI * 3.2) * 10;
         }
-
+        dx *= sh.habitAmp;
         dx += Math.sin(t * Math.PI * 0.9) * (this.userCurvature * 45);
 
-        // Organic meander from noise, keyed to absolute height so tissue that has already
-        // grown keeps its shape while the apex keeps extending.
-        const yAbs = t * shootHeight;
-        dx += noise.fbm2(yAbs / 75, 4.2, 3) * 11 * g.shapeNoise * Math.min(1.0, yAbs / 50);
+        // Swan neck / nodding: the top of the stalk bends toward the flower's facing side
+        if (neckAmt > 0 && t > 0.82) dx += nodDir * neckAmt * Math.pow((t - 0.82) / 0.18, 2);
 
         // Turgor loss during senescence causes stem to bow/droop with gravity
         if (senescence > 0) {
           dx += (this.seed % 2 === 0 ? 1 : -1) * Math.sin(t * Math.PI) * (24 * senescence * t);
         }
 
-        // Harmonic sway modulated by travelling gusts, plus a fine per-plant flutter
-        const bend = windStrength * 16 * Math.pow(t, 1.4) * flex;
+        // Harmonic sway modulated by travelling gusts, plus a fine per-plant flutter;
+        // hollow scapes (dandelion) bend far more than woody canes or stout stalks
+        const bend = windStrength * 16 * Math.pow(t, 1.4) * flex * sh.flex;
         const windWave = (Math.sin(time * 2.2 + t * 2.5) * (0.65 + 0.35 * Math.abs(gust)) + gust * 0.9) * bend
           + noise.noise2(time * 0.9, t * 1.7) * bend * 0.25;
 
@@ -1024,9 +1299,7 @@
           }
         }
 
-        const x = dx + windWave + pointerDeflection;
-        const y = t * shootHeight;
-        stemNodes.push({ x, y, t, angle: 0 });
+        stemNodes.push({ x: sx + dx + windWave + pointerDeflection, y, t, angle: 0 });
       }
 
       // Tangent of the stem at every node: clockwise lean from vertical, used to rotate glyphs
@@ -1180,7 +1453,10 @@
         leaves,
         branches,
         flowerScale,
-        headTilt: this.geneticHeadTilt + (senescence * 0.45 * (this.seed % 2 === 0 ? 1 : -1)),
+        // Mature heads nod (sunflowers strongly); senescent ones droop further
+        headTilt: this.geneticHeadTilt * 0.6 + nodDir * sh.nod * smoothstep(0.6, 1.0, growthAge) * (af && af.state === 'seedhead' ? 1.4 : 1.0)
+          + (senescence * 0.45 * (this.seed % 2 === 0 ? 1 : -1)),
+        dandelionClock: this.isSeedClock(bloomOverride, bloom),
         petalChaos: this.geneticPetalChaos,
         activeLeafCount: activeLeaves.length,
         branchCount: branches.length,
@@ -1188,7 +1464,7 @@
         windLean: clamp((stemNodes[stemNodes.length - 1].angle || 0) * 0.6, -0.45, 0.45),
         leafFlutter: windStrength * flex * (0.08 * Math.sin(time * 3.1) + 0.12 * gust),
         shapeNoise: g.shapeNoise,
-        variant: (Math.imul(this.seed | 0, 2654435761) >>> 0) / 4294967296,
+        variant: this.variant(),
         noise,
         time
       };
@@ -1229,107 +1505,22 @@
       }
 
       // -------------------------------------------------------------
-      // 1. STEM DRAWING (SPECIES-SPECIFIC)
-      // Every stem glyph is rotated to the local tangent of the stem spline and
-      // multi-strand stems are offset perpendicular to it, so curves read as
-      // continuous strokes instead of stair-stepped columns.
+      // 1. SHOOT (SPECIES PROFILE: THICKNESS, TAPER, SURFACE TEXTURE)
       // -------------------------------------------------------------
-      const stem = (n, offset, char, fg, size) => {
-        const ca = Math.cos(n.angle);
-        const sa = Math.sin(n.angle);
-        glyphs.push({ x: originX + n.x + ca * offset, y: groundY - n.y + sa * offset, char, fg, size, rot: n.angle });
-      };
-
-      if (pType === 'sunflower') {
-        for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          const ch = (i % 5 === 0) ? "%" : ((i % 7 === 0) ? "#" : "|");
-          if (n.y < shootH * 0.55) {
-            stem(n, -4, "|", cStem, 14);
-            stem(n, 0, ch, cStemDark, 14);
-            stem(n, 4, "|", cStem, 14);
-          } else {
-            stem(n, -2, "|", cStem, 14);
-            stem(n, 2, ch, cStemDark, 14);
-          }
-        }
-      } else if (pType === 'iris') {
-        for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          stem(n, 0, "|", cStem, 14);
-          if (i % 12 === 0 && i > 5 && i < nodes.length - 8) {
-            stem({ x: n.x, y: n.y + 4, angle: n.angle }, -4, "(", cStemDark, 13);
-            stem({ x: n.x, y: n.y + 4, angle: n.angle }, 4, ")", cStemDark, 13);
-          }
-        }
-      } else if (pType === 'thistle') {
-        for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          stem(n, 0, "|", cStem, 14);
-          if (i % 3 === 0) {
-            stem(n, -5, "!", cStem, 12);
-            stem(n, 5, "!", cStem, 12);
-          }
-        }
-      } else if (pType === 'dandelion') {
-        for (let i = 0; i < nodes.length; i++) {
-          stem(nodes[i], 0, "|", cStem, 14);
-        }
-      } else if (pType === 'rose') {
-        for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          stem(n, 0, "|", cStem, 14);
-          if (i % 7 === 0 && i > 3) {
-            const thornSide = (i % 14 === 0) ? -1 : 1;
-            stem(n, thornSide * 6, thornSide < 0 ? "<" : ">", '#d23737', 13);
-          }
-        }
-      } else if (pType === 'tulip') {
-        for (let i = 0; i < nodes.length; i++) {
-          stem(nodes[i], -2, "|", cStem, 14);
-          stem(nodes[i], 2, "|", cStemDark, 14);
-        }
-      } else if (pType === 'marigold') {
-        for (let i = 0; i < nodes.length; i++) {
-          stem(nodes[i], 0, (i % 4 === 0 ? ":" : "|"), cStem, 13);
-        }
-      } else if (pType === 'daffodil') {
-        for (let i = 0; i < nodes.length; i++) {
-          stem(nodes[i], 0, "|", cStem, 14);
-        }
-        const top = nodes[nodes.length - 1];
-        stem({ x: top.x, y: top.y - 4, angle: top.angle }, -4, "(", '#b49650', 13);
-        stem({ x: top.x, y: top.y - 4, angle: top.angle }, 4, ")", '#b49650', 13);
-      } else {
-        for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          const ch = (i % 6 === 0) ? "%" : ((i % 7 === 0) ? "+" : "|");
-          if (n.y < shootH * 0.4) {
-            stem(n, -3, "|", cStem, 14);
-            stem(n, 3, ch, cStem, 14);
-          } else {
-            stem(n, 0, ch, cStem, 14);
-          }
-        }
-      }
-
-      // -------------------------------------------------------------
-      // 2. FOLIAGE DRAWING (SPECIES-SPECIFIC)
-      // Leaves are laid out in a leaf-local frame and rotated as a whole around their
-      // base (genetic tilt + noise + wind flutter); each glyph shares that rotation.
-      // -------------------------------------------------------------
+      const bot = botanyOf(pType);
       const flutter = pData.leafFlutter || 0;
       const growthAge = pData.growthAge !== undefined ? pData.growthAge : Math.min(1.0, age);
-      const leafPush = (bx, by, theta, ox, oy, char, fg, size) => {
-        const ct = Math.cos(theta);
-        const st = Math.sin(theta);
-        glyphs.push({ x: bx + ox * ct - oy * st, y: by + ox * st + oy * ct, char, fg, size, rot: theta });
-      };
+      const fPal = palette.flowers[pType] || palette.flowers.sunflower;
       const nodeAt = y => {
         const t = y / Math.max(1, shootH);
         return nodes[Math.min(nodes.length - 1, Math.max(0, Math.floor(t * (nodes.length - 1))))];
       };
 
+      BotanicalArchitect._drawShoot(glyphs, nodes, originX, groundY, shootH, bot.shoot, palette, fPal, seed);
+
+      // -------------------------------------------------------------
+      // 2. FOLIAGE (SPECIES LEAF FORM)
+      // -------------------------------------------------------------
       if (pType === 'iris') {
         // Fan of flat, sword-shaped (ensiform) blades: two strands that taper to a point,
         // leaning gently outward and swaying with the wind
@@ -1351,8 +1542,9 @@
             const ca = Math.cos(rot);
             const sa = Math.sin(rot);
             const col = u < 0.7 ? cStem : cStemDark;
-            glyphs.push({ x: px - ca * w, y: py - sa * w, char: "|", fg: col, size: 13, rot });
-            if (u < 0.92) glyphs.push({ x: px + ca * w, y: py + sa * w, char: "|", fg: cStemDark, size: 13, rot });
+            const gl = stemGlyph(rot);
+            glyphs.push({ x: px - ca * w, y: py - sa * w, char: gl.char, fg: col, size: 13, rot: gl.rot });
+            if (u < 0.92) glyphs.push({ x: px + ca * w, y: py + sa * w, char: gl.char, fg: cStemDark, size: 13, rot: gl.rot });
             prevX = px;
             prevY = py;
           }
@@ -1361,25 +1553,23 @@
         // Basal rosette of runcinate ("lion's tooth") leaves lying low over the soil.
         // Sized by growth age (0..1), never by total lifespan.
         const numLeaves = 6 + (seed % 3);
-        const wilt = pData.senescence || 0;
-        const leafCol = wilt > 0.15 ? cWilted : cStem;
-        const toothCol = wilt > 0.15 ? cDead : cStemDark;
+        const leafCol = sen > 0.15 ? cWilted : cStem;
+        const toothCol = sen > 0.15 ? cDead : cStemDark;
         for (let i = 0; i < numLeaves; i++) {
           const side = i % 2 === 0 ? -1 : 1;
           const rank = Math.floor(i / 2);
-          const elev = 0.18 + rank * 0.16 + (((seed * (i + 1) * 7) % 11) - 5) * 0.015 - wilt * 0.2;
+          const elev = 0.18 + rank * 0.16 + (((seed * (i + 1) * 7) % 11) - 5) * 0.015 - sen * 0.2;
           const leafScale = 0.75 + (((seed * (i + 3) * 13) % 17) / 17) * 0.45;
           const leafLen = (34 + 22 * Math.cos(rank * 0.9)) * leafScale * (0.25 + 0.75 * growthAge);
-          const theta = side < 0 ? Math.PI + elev : -elev; // direction of the midrib
+          const theta = side < 0 ? Math.PI + elev : -elev;
           const dirX = Math.cos(theta);
           const dirY = Math.sin(theta);
           for (let d = 6; d <= leafLen; d += 7) {
             const u = d / leafLen;
-            const droop = u * u * (5 + wilt * 10) - flutter * 20 * u;
+            const droop = u * u * (5 + sen * 10) - flutter * 20 * u;
             const mx = originX + dirX * d;
             const my = groundY - 2 + dirY * d + droop;
             glyphs.push({ x: mx, y: my, char: "-", fg: leafCol, size: 12, rot: theta });
-            // Backward-pointing lobes, widest mid-leaf, alternating above and below the midrib
             const lobe = Math.sin(u * Math.PI) * 5 * leafScale;
             if (lobe > 1.5 && (d / 7) % 2 < 1) {
               const up = ((d / 7) % 4) < 2 ? -1 : 1;
@@ -1394,80 +1584,8 @@
             }
           }
         }
-      } else if (pType === 'marigold') {
-        leaves.forEach(leaf => {
-          const n = nodeAt(leaf.y);
-          const lx = originX + n.x;
-          const lyScreen = groundY - leaf.y;
-          const lScale = leaf.scale || 1.0;
-          const isW = leaf.isWilted;
-          const col = isW ? cWilted : cStem;
-          const theta = -leaf.side * (0.12 + leaf.tilt) + flutter;
-
-          if (leaf.state === 'bud') {
-            leafPush(lx, lyScreen, theta, leaf.side * 4, -2, leaf.side < 0 ? "'" : "`", cStem, 10);
-            return;
-          }
-
-          const rachisLen = Math.round(32 * lScale);
-          for (let r = 8; r <= rachisLen; r += 8) {
-            const ox = leaf.side * r;
-            const oy = -(r * 0.25) + (isW ? r * 0.45 : 0);
-            leafPush(lx, lyScreen, theta, ox, oy, isW ? "~" : "-", col, Math.max(9, Math.round(12 * lScale)));
-            if (!isW) {
-              leafPush(lx, lyScreen, theta, ox, oy - 6 * lScale, "/", cStem, Math.max(8, Math.round(11 * lScale)));
-              leafPush(lx, lyScreen, theta, ox, oy + 6 * lScale, "\\", cStem, Math.max(8, Math.round(11 * lScale)));
-            } else {
-              leafPush(lx, lyScreen, theta, ox, oy + 4 * lScale, "\\", cDead, Math.max(8, Math.round(10 * lScale)));
-            }
-          }
-        });
-      } else if (pType === 'tulip') {
-        [-1, 1].forEach(side => {
-          const tLeafH = shootH * 0.55;
-          for (let step = 0; step <= tLeafH; step += 9) {
-            const lt = step / tLeafH;
-            const ly = groundY - step;
-            const arch = Math.sin(lt * Math.PI) * 28 * side + flutter * 25 * lt * lt;
-            const slope = Math.cos(lt * Math.PI) * Math.PI * 28 * side / tLeafH;
-            const rot = Math.atan2(slope, 1);
-            const lx = originX + arch;
-            glyphs.push({ x: lx, y: ly, char: side < 0 ? "(" : ")", fg: cStem, size: 15, rot });
-            glyphs.push({ x: lx + side * 3, y: ly, char: "|", fg: cStemDark, size: 13, rot });
-          }
-        });
-      } else if (pType === 'thistle') {
-        leaves.forEach(leaf => {
-          const n = nodeAt(leaf.y);
-          const lx = originX + n.x;
-          const lyScreen = groundY - leaf.y;
-          const lScale = leaf.scale || 1.0;
-          const isW = leaf.isWilted;
-          const col = isW ? cWilted : cStem;
-          const theta = -leaf.side * (0.10 + leaf.tilt) + flutter;
-
-          if (leaf.state === 'bud') {
-            leafPush(lx, lyScreen, theta, leaf.side * 4, -2, "*", cStem, 10);
-            return;
-          }
-          if (isW) {
-            leafPush(lx, lyScreen, theta, leaf.side * 8 * lScale, 6 * lScale, "\\", cWilted, 12);
-            leafPush(lx, lyScreen, theta, leaf.side * 14 * lScale, 12 * lScale, "~", cDead, 11);
-            leafPush(lx, lyScreen, theta, leaf.side * 20 * lScale, 18 * lScale, "v", cDead, 10);
-            return;
-          }
-          const spinyPts = [
-            { ox: 8, oy: -6, ch: "/" }, { ox: 16, oy: -10, ch: "*" }, { ox: 22, oy: -6, ch: "\\" },
-            { ox: 12, oy: 0, ch: "#" }, { ox: 20, oy: 0, ch: "%" }, { ox: 28, oy: 0, ch: "!" },
-            { ox: 8, oy: 6, ch: "\\" }, { ox: 16, oy: 10, ch: "*" }, { ox: 24, oy: 6, ch: "/" }
-          ];
-          const size = Math.max(10, Math.round(13 * lScale));
-          spinyPts.forEach(pt => {
-            leafPush(lx, lyScreen, theta, leaf.side * pt.ox * lScale, pt.oy * lScale, pt.ch, col, size);
-          });
-        });
       } else if (pType === 'daffodil') {
-        // Flat ribbon leaves rising from the bulb and arching outward under their own weight
+        // Flat strap leaves rising from the bulb and arching outward under their own weight
         [-1, -1, 1, 1].forEach((side, li) => {
           const leafH = shootH * (li % 2 === 0 ? 0.62 : 0.48) * (0.3 + 0.7 * growthAge);
           const spread = (li % 2 === 0 ? 30 : 46) * (1.0 + 0.6 * sen);
@@ -1482,99 +1600,133 @@
             const ca = Math.cos(rot);
             const sa = Math.sin(rot);
             const w = 2.2 * (1 - u * 0.6);
-            glyphs.push({ x: px - ca * w, y: py - sa * w, char: "|", fg: cStem, size: 13, rot });
-            glyphs.push({ x: px + ca * w, y: py + sa * w, char: "|", fg: cStemDark, size: 13, rot });
+            const gl = stemGlyph(rot);
+            glyphs.push({ x: px - ca * w, y: py - sa * w, char: gl.char, fg: cStem, size: 13, rot: gl.rot });
+            glyphs.push({ x: px + ca * w, y: py + sa * w, char: side < 0 ? '(' : ')', fg: cStemDark, size: 13, rot });
             prevX = px;
             prevY = py;
           }
         });
+      } else if (pType === 'tulip') {
+        // Two or three broad, glaucous, wavy-edged leaves clasping the stem base and arching out
+        const n = 2 + (seed % 2);
+        for (let i = 0; i < n; i++) {
+          const side = i % 2 === 0 ? -1 : 1;
+          const L = shootH * (0.42 + 0.1 * i) * (0.3 + 0.7 * growthAge);
+          const ang = -Math.PI / 2 + side * (0.2 + 0.16 * i) + flutter * 0.6;
+          drawLamina(glyphs, originX + side * 3, groundY, ang, L, L * 0.12,
+            u => LAMINA.lanceolate(u) * (1 + 0.07 * Math.sin(u * 22)),
+            { edge: cStem, fill: cStemDark, hatch: 1, texture: [':', ';'], rib: cStemDark, size: 11, curl: side * (0.3 + 0.3 * sen) });
+        }
+      } else if (pType === 'flytrap') {
+        // Rosette of traps: a winged, heart-shaped petiole ending in two hinged lobes,
+        // red inside, rimmed with long marginal cilia
+        const nTraps = 5 + (seed % 3);
+        for (let i = 0; i < nTraps; i++) {
+          const side = i % 2 === 0 ? -1 : 1;
+          const rank = Math.floor(i / 2);
+          const k = 1.5 * (0.35 + 0.65 * growthAge) * (0.8 + 0.4 * hash01(seed, i));
+          const elev = 0.1 + rank * 0.24 + (hash01(seed + 3, i) - 0.5) * 0.15;
+          const ang = (side < 0 ? Math.PI + elev : -elev) + flutter * 0.5;
+          const Lp = (14 + 7 * rank) * k;
+          const px = originX + side * 2;
+          const py = groundY - 2;
+          drawLamina(glyphs, px, py, ang, Lp, 3.2 * k, LAMINA.obovate, { edge: cStem, fill: cStemDark, hatch: 1, size: 9 });
+          const tx = px + Math.cos(ang) * Lp;
+          const ty = py + Math.sin(ang) * Lp;
+          const closed = hash01(seed + 11, i) < 0.2;
+          const gape = closed ? 0.06 : 0.42;
+          const Lt = 13 * k;
+          const Wt = 6.5 * k;
+          for (const lobe of [-1, 1]) {
+            const la = ang + lobe * gape;
+            const curl = lobe * 0.12;
+            drawLamina(glyphs, tx, ty, la, Lt, Wt, LAMINA.kidney, { edge: fPal.jaw, fill: fPal.inside, hatch: closed ? 0 : 2, texture: ['@', '%', '#', '&'], size: 9, curl });
+            const ca = Math.cos(la);
+            const sa = Math.sin(la);
+            for (let c = 1; c <= 6; c++) {
+              const u = c / 7;
+              const along = u * Lt;
+              const off = curl * Lt * u * u + lobe * Wt * LAMINA.kidney(u);
+              const mx = tx + ca * along - sa * off;
+              const my = ty + sa * along + ca * off;
+              const dir = la + lobe * (Math.PI / 2 - 0.35);
+              strokeAlong(glyphs, [{ x: mx, y: my }, { x: mx + Math.cos(dir) * 6 * k, y: my + Math.sin(dir) * 6 * k }], fPal.teeth, 8);
+            }
+          }
+        }
       } else {
+        // Leafy stems: each leaf drawn in its species' form from its node
         leaves.forEach(leaf => {
           const n = nodeAt(leaf.y);
-          const lx = originX + n.x;
-          const lyScreen = groundY - leaf.y;
-          const lScale = leaf.scale || 1.0;
+          const ca = Math.cos(n.angle);
+          const half = Math.max(1, bot.shoot.width * (1 - bot.shoot.taper * (leaf.y / Math.max(1, shootH)))) * 0.5;
+          const bx = originX + n.x + ca * half * leaf.side;
+          const by = groundY - leaf.y + Math.sin(n.angle) * half * leaf.side;
           const mat = leaf.maturity !== undefined ? leaf.maturity : 1.0;
-          const theta = -leaf.side * (0.10 + leaf.tilt) + flutter;
-
-          // Nascent bud stage: leaf has just emerged from apical meristem
-          if (mat < 0.35 && !leaf.isWilted) {
-            leafPush(lx, lyScreen, theta, leaf.side * 4, -2, leaf.side < 0 ? "'" : "`", cStem, 10);
-            return;
-          }
-
-          const size = Math.max(9, Math.round(13 * lScale));
-          if (leaf.isWilted) {
-            const wiltPts = [
-              { ox: 8, oy: 4, ch: "\\" },
-              { ox: 14, oy: 10, ch: "~" },
-              { ox: 19, oy: 16, ch: "v" },
-              { ox: 23, oy: 22, ch: "." }
-            ];
-            wiltPts.forEach((pt, pIdx) => {
-              leafPush(lx, lyScreen, theta, leaf.side * pt.ox * lScale, pt.oy * lScale, pt.ch, (pIdx < 2 ? cWilted : cDead), Math.max(9, Math.round(12 * lScale)));
-            });
-          } else {
-            // Gradual leaf unfurling: petiole extends first, then lamina broadens
-            const pts = [[6, -2, leaf.side < 0 ? "/" : "\\"], [12, -2, "*"]];
-            if (mat >= 0.50) pts.push([18, -2, "%"], [8, 5, "|"], [14, 5, "#"]);
-            if (mat >= 0.70) pts.push([8, -8, "+"], [14, -8, "+"], [20, 4, "%"], [24, -2, "#"]);
-            if (mat >= 0.85) {
-              pts.push([20, -8, "+"], [26, -8, "-"], [26, 4, "&"], [30, -2, "#"],
-                [10, 12, "+"], [16, 12, "+"], [22, 12, "+"], [28, 12, "/"]);
-            }
-            pts.forEach(pt => {
-              leafPush(lx, lyScreen, theta, leaf.side * pt[0] * lScale, pt[1] * lScale, pt[2], cStem, size);
-            });
-          }
+          const baseScale = (leaf.scale || 1.0) / Math.max(0.08, mat);
+          BotanicalArchitect._stemLeaf(glyphs, bot.leaf, bx, by, leaf.side, baseScale, mat, leaf.isWilted, leaf.tilt || 0, flutter, palette);
         });
       }
 
       // -------------------------------------------------------------
-      // 3. SECONDARY BRANCHES (WITH MEMBER SUBCYCLES & CHILD LEAVES)
+      // 3. SECONDARY BRANCHES (SPECIES BRANCH HABIT, CHILD LEAVES, TIP FLOWERS)
       // -------------------------------------------------------------
+      const bp = bot.branch;
       branches.forEach(b => {
         const n0 = nodeAt(b.startY);
         const bx0 = originX + n0.x;
         const by0 = groundY - b.startY;
-
         const isWithering = (b.state === 'withering' || (b.health !== undefined && b.health < 0.35));
-        const brStemCol = isWithering ? cDead : cStem;
-        const sinA = Math.sin(b.angle);
-        const cosA = Math.cos(b.angle);
-        const wig = b.wiggle || 0;
-        const amp = 5 * (0.6 + (pData.shapeNoise || 0.7));
+        const brCol = isWithering ? cDead : cStem;
+        const straight = bp.straightness !== undefined ? bp.straightness : 0.8;
+        const resp = 0.3 + 0.7 * (1 - straight);
+        const STEP = 7;
 
-        // Branch spine with a coherent-noise wiggle; returns point + tangent rotation
-        const along = d => {
-          const w = pData.noise ? pData.noise.noise2(d / 45, wig) : Math.sin(d * 0.12);
-          const sway = flutter * 40 * (d / Math.max(1, b.length)) ** 2;
-          return {
-            x: bx0 + b.side * (d * sinA + w * amp) + sway,
-            y: by0 - d * cosA
-          };
-        };
-
-        let prev = along(0);
-        for (let bi = 8; bi <= b.length; bi += 8) {
-          const p = along(bi);
-          const rot = Math.atan2(p.x - prev.x, prev.y - p.y);
-          glyphs.push({ x: p.x, y: p.y, char: isWithering ? ":" : "|", fg: brStemCol, size: 13, rot });
-          prev = p;
+        // Integrate the branch spine: it leaves at its angle, then curves up (or arches
+        // out) by the species' up-turn, with node kinks and jaggedness like the stem
+        const pts = [{ x: bx0, y: by0, a: b.side * b.angle }];
+        let heading = b.side * b.angle;
+        let x = bx0;
+        let y = by0;
+        for (let d = STEP; d <= b.length; d += STEP) {
+          const u = d / Math.max(1, b.length);
+          const node = Math.floor(d / Math.max(8, bot.shoot.internode * 0.8));
+          const zig = (bp.kink || 0) * (node % 2 ? 1 : -1) * (0.6 + 0.8 * hash01(seed + b.index * 31, node));
+          const jag = pData.noise ? pData.noise.noise2(d / 12, b.wiggle || 0) * (1 - straight) * 0.5 : 0;
+          const sag = isWithering ? b.side * 1.1 * (1 - (b.health || 0)) * u : 0;
+          const target = b.side * b.angle * (1 - (bp.upturn || 0) * u) + zig + jag + flutter * 1.2 * u + sag;
+          heading = lerp(heading, target, resp);
+          x += Math.sin(heading) * STEP;
+          y -= Math.cos(heading) * STEP;
+          pts.push({ x, y, a: heading });
         }
 
-        // Child leaves on this branch
-        if (b.leaves && b.leaves.length > 0) {
+        const strands = (bp.width || 2) >= 3 ? 2 : 1;
+        for (let i = 1; i < pts.length; i++) {
+          const p = pts[i];
+          const ca = Math.cos(p.a);
+          const sa = Math.sin(p.a);
+          for (let k = 0; k < strands; k++) {
+            const off = strands === 1 ? 0 : (k - 0.5) * 2.4;
+            const gl = stemGlyph(p.a);
+            glyphs.push({ x: p.x + ca * off, y: p.y + sa * off, char: gl.char, fg: isWithering ? mixColor(cWilted, cDead, i / pts.length) : (k === 1 ? cStemDark : brCol), size: 12, rot: gl.rot });
+          }
+          if (bot.shoot.texture === 'thorny' && i % 3 === 0) {
+            const sd = i % 6 === 0 ? -1 : 1;
+            glyphs.push({ x: p.x + ca * sd * 3, y: p.y + sa * sd * 3, char: sd < 0 ? '<' : '>', fg: mixColor(cStemDark, fPal.dark || cStemDark, 0.55), size: 10, rot: p.a + sd * 0.35 });
+          }
+        }
+
+        const at = f => pts[Math.min(pts.length - 1, Math.max(0, Math.round(f * (pts.length - 1))))];
+
+        // Child leaves on this branch (same form as the stem leaves, smaller)
+        if (b.leaves && b.leaves.length > 0 && !bot.leaf.basal) {
           b.leaves.forEach(bl => {
             if (bl.state === 'dormant' || bl.state === 'dead') return;
-            const p = along(b.length * (bl.posAlong || 0.5));
-            const isLeafWilted = (bl.state === 'wilting' || isWithering);
-            const leafCol = isLeafWilted ? cDead : cStem;
-            const theta = isLeafWilted ? bl.side * 0.5 : -bl.side * 0.25 + flutter;
-            leafPush(p.x, p.y, theta, bl.side * 5, 0, isLeafWilted ? "~" : (bl.side < 0 ? "<" : ">"), leafCol, 11);
-            if (!isLeafWilted && (bl.scale || 0.7) > 0.6) {
-              leafPush(p.x, p.y, theta, bl.side * 11, -1, bl.side < 0 ? "<" : ">", cStemDark, 10);
-            }
+            const p = at(bl.posAlong || 0.5);
+            const wilted = (bl.state === 'wilting' || isWithering);
+            BotanicalArchitect._stemLeaf(glyphs, bot.leaf, p.x, p.y, bl.side, (bl.scale || 0.7) * 0.75, 1.0, wilted, 0, flutter, palette);
           });
         }
 
@@ -1583,12 +1735,12 @@
         let bBloom = (bFlower && bFlower.state !== 'dormant' && !bFlower.isDead) ? bFlower.bloom : (b.hasFlower ? bloom * 0.8 : 0);
         if (bFlower && bFlower.state === 'wilting') bBloom = Math.max(bBloom, 0.85);
         if (bBloom > 0.15) {
-          const tip = along(b.length);
+          const tip = pts[pts.length - 1];
           const ownWilt = (bFlower && bFlower.state === 'wilting') ? clamp(1 - bFlower.bloom / 0.85, 0, 1) : 0;
           const secFlower = ProceduralFlowerRenderer.generateGlyphs(
             pType, tip.x, tip.y, fScale * 0.65, bBloom, palette, time, false,
             Math.max(ownWilt, isWithering ? 0.8 : 0, smoothstep(0.1, 0.8, pData.ageing || 0)),
-            b.side * b.angle * 0.4 + (pData.windLean || 0), pData.variant
+            tip.a * 0.5 + (pData.windLean || 0), pData.variant
           );
           glyphs.push(...secFlower);
         }
@@ -1610,13 +1762,182 @@
       } else if (pData.isBud) {
         const flowerGlyphs = ProceduralFlowerRenderer.generateGlyphs(
           pType, tiltX, tiltY, fScale, bloom, palette, time, seedsBlown, pData.flowerWilt || 0,
-          tilt * 0.5 + (pData.windLean || 0), pData.variant
+          tilt * 0.5 + (pData.windLean || 0), pData.variant, { clock: pData.dandelionClock }
         );
         glyphs.push(...flowerGlyphs);
       }
 
       BotanicalArchitect._applyAgeing(glyphs, pData, groundY, palette);
       return glyphs;
+    }
+
+    /**
+     * Stem drawn from the species shoot profile: 1-3 tangent-aligned strands (thickness
+     * and taper), then the surface texture — hairs, hooked prickles, spiny wings,
+     * woody bark with node scars, ridged nodes, two-edged scape or sheathing spathes.
+     */
+    static _drawShoot(glyphs, nodes, originX, groundY, shootH, sh, palette, fPal, seed) {
+      const cStem = palette.stem;
+      const cDark = palette.stemDark;
+      const bark = mixColor(cDark, palette.dead || cDark, 0.45);
+      const prickle = mixColor(cDark, fPal.dark || fPal.inner || cDark, 0.55);
+      const spathe = mixColor(cDark, palette.wilted || cDark, 0.35);
+      const put = (n, offset, char, fg, size, extraRot = 0) => {
+        const ca = Math.cos(n.angle);
+        const sa = Math.sin(n.angle);
+        let rot = n.angle + extraRot;
+        if (char === null) {
+          const gl = stemGlyph(n.angle);
+          char = gl.char;
+          rot = gl.rot;
+        }
+        glyphs.push({ x: originX + n.x + ca * offset, y: groundY - n.y + sa * offset, char, fg, size, rot });
+      };
+      // Texture characters woven into the core strand, like classic ASCII stems
+      const CORE_TEXTURE = { hairy: ['%', '#'], woody: ['#', '%'], winged: ['!', '+'], ridged: [':', ':'], thorny: [':', '+'] };
+      let lastNode = 0;
+
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const t = n.y / Math.max(1, shootH);
+        const w = Math.max(1, sh.width * (1 - sh.taper * t));
+        let strands = w >= 6 ? 3 : (w >= 3.5 ? 2 : 1);
+        let spread = w;
+        if (sh.texture === 'twoEdged') { strands = 2; spread = 2.8; }
+        const size = 13 + Math.min(2, w * 0.2);
+        for (let k = 0; k < strands; k++) {
+          const off = strands === 1 ? 0 : (k / (strands - 1) - 0.5) * spread;
+          let col = (strands > 1 && k === strands - 1) || (strands === 3 && k === 1) ? cDark : cStem;
+          if (sh.texture === 'woody' && t < 0.45) col = mixColor(col, bark, 1 - t / 0.45);
+          const tex = CORE_TEXTURE[sh.texture];
+          const core = strands === 1 || (strands === 3 && k === 1) || (strands === 2 && k === 1);
+          let ch = null;
+          if (tex && core && i % 5 === 0) ch = tex[0];
+          else if (tex && core && i % 7 === 0) ch = tex[1];
+          put(n, off, ch, col, size, ch ? 0 : 0);
+        }
+
+        const node = Math.floor(n.y / sh.internode);
+        const isNode = i > 0 && node !== lastNode;
+        lastNode = node;
+        const half = (strands === 1 ? 0 : spread / 2) + 2;
+
+        switch (sh.texture) {
+          case 'hairy':
+            if (i % 2 === 0) {
+              const sd = i % 4 === 0 ? 1 : -1;
+              put(n, sd * half, "'", cStem, 8, sd * 0.9);
+            }
+            break;
+          case 'thorny':
+            // Hooked prickles at nodes and scattered between them, pointing slightly down
+            if (isNode || hash01(seed, i) < 0.1) {
+              const sd = hash01(seed + 7, i) < 0.5 ? -1 : 1;
+              put(n, sd * (half + 1.5), sd < 0 ? '<' : '>', prickle, 11, sd * 0.35);
+            }
+            break;
+          case 'winged':
+            // Decurrent spiny wings running down both sides of the stem
+            if (i % 2 === 0) {
+              for (const sd of [-1, 1]) {
+                put(n, sd * (half + 2), sd < 0 ? '<' : '>', cStem, 10);
+                if (i % 4 === 0) put(n, sd * (half + 6), "'", cDark, 8, sd * 1.2);
+              }
+            }
+            break;
+          case 'woody':
+            if (isNode && t < 0.9) put(n, 0, '-', t < 0.45 ? bark : cDark, 10);
+            break;
+          case 'ridged':
+            if (isNode) put(n, 0, ':', cDark, 11);
+            break;
+          case 'scape':
+            if (isNode && t > 0.15 && t < 0.88) {
+              put(n, -3, '(', spathe, 12, 0.15);
+              put(n, 3, ')', spathe, 12, -0.15);
+            }
+            break;
+          default:
+            break;
+        }
+      }
+    }
+
+    /**
+     * One stem leaf in the species' form, rising from its axil and drooping with size:
+     * cordate (sunflower), ovate (hibiscus), odd-pinnate (rose), finely pinnate
+     * (marigold) or spiny-lobed (thistle). Leaves lengthen first and broaden later as
+     * they unfurl, and wilted leaves hang and curl.
+     */
+    static _stemLeaf(out, lp, bx, by, side, scale, maturity, wilted, tilt, flutter, palette) {
+      const m = clamp(maturity, 0.06, 1);
+      const L = (lp.length || 36) * scale * (0.3 + 0.7 * m);
+      const size = clamp(9 * Math.sqrt(scale), 8, 11);
+      const edge = wilted ? palette.wilted : palette.stem;
+      const vein = wilted ? palette.dead : palette.stemDark;
+      const droop = lp.droop || 0.1;
+      const lift = wilted ? -0.9 : (0.6 - droop * m * 0.8 + tilt);
+      const ang = (side < 0 ? Math.PI + lift : -lift) + flutter * 0.8;
+      const curl = side * (wilted ? 0.35 : droop * 0.5 * m);
+      const ca = Math.cos(ang);
+      const sa = Math.sin(ang);
+      const along = (u, len) => ({ x: bx + ca * u * len - sa * curl * len * u * u, y: by + sa * u * len + ca * curl * len * u * u });
+
+      if (lp.form === 'cordate' || lp.form === 'ovate') {
+        const pet = L * (lp.petiole || 0);
+        const pEnd = along(pet / Math.max(1, L), L);
+        strokeAlong(out, [{ x: bx, y: by }, pEnd], vein, size * 0.9);
+        const W = L * (lp.width || 0.5) * 0.5 * Math.pow(m, 1.2);
+        drawLamina(out, pEnd.x, pEnd.y, ang + curl * 0.6, L - pet, W, LAMINA[lp.form], {
+          edge, rib: vein, serrate: lp.serrate && !wilted, curl, size
+        });
+      } else if (lp.form === 'spinyLobed') {
+        const W = L * (lp.width || 0.36) * 0.5 * Math.pow(m, 1.2);
+        const shape = u => LAMINA.lanceolate(u) * (0.5 + 0.5 * Math.abs(Math.sin(3.5 * Math.PI * u)));
+        drawLamina(out, bx, by, ang, L, W, shape, { edge, rib: vein, curl, size });
+        if (!wilted) {
+          for (let k = 0; k < 3; k++) {
+            const u = (k + 0.5) / 3.5;
+            for (const sd of [-1, 1]) {
+              const v = sd * W * shape(u) * 1.05;
+              const px = bx + ca * u * L - sa * (curl * L * u * u + v);
+              const py = by + sa * u * L + ca * (curl * L * u * u + v);
+              const dir = ang + sd * (Math.PI / 2 - 0.5);
+              out.push({ x: px + Math.cos(dir) * 2.5, y: py + Math.sin(dir) * 2.5, char: "'", fg: vein, size: 8, rot: dir + Math.PI / 2 });
+            }
+          }
+        }
+      } else if (lp.form === 'pinnate' || lp.form === 'pinnateFine') {
+        const fine = lp.form === 'pinnateFine';
+        const rachis = [];
+        for (let i = 0; i <= 6; i++) rachis.push(along(i / 6, L));
+        strokeAlong(out, rachis, vein, size * 0.85);
+        const pairs = fine ? 6 : (L > 30 ? 3 : 2);
+        const lfL = L * (fine ? 0.26 : 0.32);
+        const lfW = lfL * (fine ? 0.1 : 0.28) * Math.pow(m, 1.2);
+        const start = lp.petiole || 0.12;
+        for (let k = 0; k < pairs; k++) {
+          const u = start + (0.92 - start) * (k / pairs);
+          const p = along(u, L);
+          const q = along(Math.min(1, u + 0.02), L);
+          const ra = Math.atan2(q.y - p.y, q.x - p.x);
+          const len = lfL * (1 - 0.3 * u) * (0.4 + 0.6 * m);
+          for (const sd of [-1, 1]) {
+            const la = ra + sd * (fine ? 0.8 : 0.95) + (wilted ? side * 0.5 : 0);
+            if (fine) {
+              strokeAlong(out, [p, { x: p.x + Math.cos(la) * len, y: p.y + Math.sin(la) * len }], edge, size * 0.85);
+            } else {
+              drawLamina(out, p.x, p.y, la, len, lfW, LAMINA.ovate, { edge, size: size * 0.85 });
+            }
+          }
+        }
+        // Terminal leaflet
+        const tip = rachis[rachis.length - 1];
+        const pre = rachis[rachis.length - 2];
+        const ta = Math.atan2(tip.y - pre.y, tip.x - pre.x);
+        if (fine) strokeAlong(out, [tip, { x: tip.x + Math.cos(ta) * lfL * 0.8, y: tip.y + Math.sin(ta) * lfL * 0.8 }], edge, size * 0.85);
+        else drawLamina(out, tip.x, tip.y, ta, lfL * 0.9 * (0.4 + 0.6 * m), lfW * 1.1, LAMINA.ovate, { edge, serrate: lp.serrate && !wilted, size: size * 0.85 });
+      }
     }
 
     /**
@@ -1654,7 +1975,7 @@
   // 5. PROCEDURAL FLOWER HEAD GEOMETRY ENGINE (GRADUAL BUD-TO-BLOOM MATH)
   // =========================================================================
 
-  const HEAD_ROT_RESPONSE = { hibiscus: 0.25, iris: 0.45, tulip: 0.7, flytrap: 0.6 };
+  const HEAD_ROT_RESPONSE = { hibiscus: 0.25, iris: 0.45, tulip: 0.7, flytrap: 0.6, daffodil: 0.4 };
 
   class ProceduralFlowerRenderer {
     /**
@@ -1662,8 +1983,8 @@
      * with the stem tip and the wind; variant (0..1) gives each individual its own
      * petal irregularity.
      */
-    static generateGlyphs(type, cx, cy, scale, bloom, palette, time = 0, seedsBlown = false, wilt = 0, headRot = 0, variant = 0) {
-      const glyphs = this._generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, variant);
+    static generateGlyphs(type, cx, cy, scale, bloom, palette, time = 0, seedsBlown = false, wilt = 0, headRot = 0, variant = 0, opts = {}) {
+      const glyphs = this._generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, variant, opts);
       return this._finishHead(glyphs, type, cx, cy, scale, palette, wilt, headRot);
     }
 
@@ -1773,444 +2094,415 @@
       return out;
     }
 
-    static _generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, variant) {
-      const glyphs = [];
-      const fPalette = palette.flowers[type] || palette.flowers.sunflower;
-      const cStem = palette.stem;
-
-      // STAGE 1: TIGHT CLOSED BUD (bloom < 0.18)
-      // All species start as a compact protective calyx capsule with sepals!
-      if (bloom < 0.18) {
-        const budProgress = bloom / 0.18; // 0.0 to 1.0
-        const budSize = (12 + budProgress * 4) * scale;
-        // Calyx sepals wrapping the bud
-        glyphs.push({ x: cx - 5 * scale, y: cy - 4 * scale, char: "(", fg: cStem, size: budSize });
-        glyphs.push({ x: cx, y: cy - 8 * scale, char: "#", fg: cStem, size: budSize });
-        glyphs.push({ x: cx + 5 * scale, y: cy - 4 * scale, char: ")", fg: cStem, size: budSize });
-        // Colored petal tip peeking out as sepals loosen!
-        if (budProgress > 0.4) {
-          glyphs.push({ x: cx, y: cy - 14 * scale, char: "*", fg: fPalette.petal || fPalette.standard || '#ffe628', size: 12 * scale });
-        }
-        return glyphs;
-      }
-
-      // STAGE 2: PARTING SEPALS & CONICAL BUD (0.18 <= bloom < 0.45)
-      // Sepals peel back outward; inner petals form an emerging cone
-      if (bloom < 0.45) {
-        const partProgress = (bloom - 0.18) / 0.27;
-        const sepalDist = 12 * scale * partProgress;
-        // Parted sepals
-        glyphs.push({ x: cx - sepalDist, y: cy + 2 * scale, char: "\\", fg: cStem, size: 14 * scale });
-        glyphs.push({ x: cx + sepalDist, y: cy + 2 * scale, char: "/", fg: cStem, size: 14 * scale });
-        glyphs.push({ x: cx, y: cy + 4 * scale, char: "v", fg: cStem, size: 13 * scale });
-        // Emerging petal cone
-        const petalCol = fPalette.petal || fPalette.outer || fPalette.standard || '#ffe628';
-        glyphs.push({ x: cx - 4 * scale, y: cy - 8 * scale, char: "(", fg: petalCol, size: 14 * scale });
-        glyphs.push({ x: cx, y: cy - 12 * scale, char: "^", fg: petalCol, size: 15 * scale });
-        glyphs.push({ x: cx + 4 * scale, y: cy - 8 * scale, char: ")", fg: petalCol, size: 14 * scale });
-        return glyphs;
-      }
-
-      // STAGE 3 & 4: HALF-BLOOM & FULL ANTHESIS (bloom >= 0.45)
-      // Mathematical expansion factor b_eff: 0.0 at bloom=0.45, 1.0 at bloom=1.0
-      const bEff = smoothstep(0.45, 1.0, bloom);
-      this._variant = variant || 0;
-
+    /**
+     * Each species is built from the same primitives (laminas, spirals, spheres) and is
+     * continuous over bloom 0..1: a bud is the same petals folded closed and still green.
+     */
+    static _generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, variant, opts = {}) {
+      const out = [];
+      const pal = palette.flowers[type] || palette.flowers.sunflower;
+      const b = clamp(bloom, 0, 1);
+      const s = scale;
       switch (type) {
-        case 'sunflower':
-          this._buildSunflower(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
-        case 'hibiscus':
-          this._buildHibiscus(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
-        case 'iris':
-          this._buildIris(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
-        case 'thistle':
-          this._buildThistle(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
-        case 'marigold':
-          this._buildMarigold(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
-        case 'daffodil':
-          this._buildDaffodil(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
-        case 'rose':
-          this._buildRose(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
+        case 'hibiscus': this._buildHibiscus(out, cx, cy, s, b, pal, palette, variant); break;
+        case 'iris': this._buildIris(out, cx, cy, s, b, pal, palette); break;
+        case 'thistle': this._buildThistle(out, cx, cy, s, b, pal, palette); break;
+        case 'marigold': this._buildMarigold(out, cx, cy, s, b, pal, palette, variant); break;
+        case 'daffodil': this._buildDaffodil(out, cx, cy, s, b, pal, palette, variant); break;
+        case 'rose': this._buildRose(out, cx, cy, s, b, pal, palette, variant); break;
         case 'dandelion':
-          this._buildDandelion(glyphs, cx, cy, scale, bEff, fPalette, time, seedsBlown);
+          if (opts.clock) this._buildDandelion(out, cx, cy, s, b, pal, time, seedsBlown);
+          else this._buildDandelionFlower(out, cx, cy, s, b, pal, palette);
           break;
-        case 'tulip':
-          this._buildTulip(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
-        case 'flytrap':
-          this._buildFlytrap(glyphs, cx, cy, scale, bEff, fPalette, time);
-          break;
-        default:
-          this._buildSunflower(glyphs, cx, cy, scale, bEff, fPalette, time);
+        case 'tulip': this._buildTulip(out, cx, cy, s, b, pal, palette); break;
+        case 'flytrap': this._buildFlytrap(out, cx, cy, s, b, pal, palette); break;
+        default: this._buildSunflower(out, cx, cy, s, b, pal, palette, variant);
       }
-
-      return glyphs;
+      return out;
     }
 
     /**
-     * Bounded Sunflower Architecture:
-     * Central Fibonacci disc florets are strictly bounded within rDisc.
-     * Ray petals radiate outwards from rDisc to frame the seed head with zero side bleeding.
+     * Sunflower capitulum: Fibonacci-numbered ray florets (21 or 34) around a disc of
+     * florets packed in a golden-angle spiral, green involucral bracts behind.
+     * In bud the bracts close over the disc.
      */
-    static _buildSunflower(out, cx, cy, s, b, pal, time) {
+    static _buildSunflower(out, cx, cy, s, b, pal, P, variant) {
       const fcy = cy - 25 * s;
+      const o = smoothstep(0.2, 1.0, b);
+      const ky = 0.88;
+      const rD = 22 * s * (0.35 + 0.65 * o);
+      const vPhase = (variant || 0) * 40;
+      const golden = 2.3999632;
 
-      // 1. Central Fibonacci Phyllotaxis Seed Disc (Strictly bounded inside rDisc)
-      const rDisc = 22 * s * (0.35 + 0.65 * b);
-      const numFlorets = Math.floor(40 * (0.35 + 0.65 * b));
-      const goldenAngle = 2.3999632; // 137.5 degrees
-
-      for (let k = 0; k < numFlorets; k++) {
-        const rFrac = Math.sqrt((k + 0.5) / numFlorets);
-        const r = rFrac * rDisc;
-        const theta = k * goldenAngle;
-        const px = cx + Math.cos(theta) * r;
-        const py = fcy + Math.sin(theta) * (r * 0.88);
-
-        let ch = '#';
-        let col = pal.coreDeep;
-        if (rFrac < 0.35) {
-          ch = (k % 3 === 0) ? '8' : '&';
-          col = pal.coreDeep;
-        } else if (rFrac < 0.75) {
-          ch = (k % 2 === 0) ? '*' : '#';
-          col = pal.core;
-        } else {
-          ch = (k % 2 === 0) ? '%' : 'o';
-          col = pal.petalWarm;
-        }
-
-        out.push({
-          x: px,
-          y: py,
-          char: ch,
-          fg: col,
-          size: Math.max(9, Math.round((10 + (1 - rFrac) * 3) * s))
-        });
+      // Involucral bracts (phyllaries) peeking between the rays
+      for (let k = 0; k < 18; k++) {
+        const a = (k / 18) * Math.PI * 2 + 0.17;
+        const r = rD * (1.0 + 0.12 * (1 - o));
+        const ang = Math.atan2(Math.sin(a) * ky, Math.cos(a));
+        out.push({ x: cx + Math.cos(a) * r, y: fcy + Math.sin(a) * r * ky, char: '^', fg: k % 2 ? P.stem : P.stemDark, size: Math.max(8, 10 * s), rot: ang + Math.PI / 2 });
       }
 
-      // 2. Radiant Golden Ray Petals (cradling the disc florets from rDisc outwards)
-      if (b > 0.15) {
-        const petalProgress = (b - 0.15) / 0.85;
-        const numPetals = Math.floor(22 + 14 * petalProgress);
-        const maxLen = 38 * s * petalProgress;
-        const glyphsChoice = ["(", ")", "{", "}", "~", "S", "s", "%", "&"];
+      if (o < 0.25) {
+        // Closed bud: overlapping bracts spiral over the disc
+        const nb = 22;
+        for (let k = 0; k < nb; k++) {
+          const rf = Math.sqrt((k + 0.5) / nb);
+          const th = k * golden;
+          out.push({ x: cx + Math.cos(th) * rf * rD, y: fcy + Math.sin(th) * rf * rD * ky, char: '^', fg: k % 2 ? P.stem : P.stemDark, size: Math.max(8, 10 * s), rot: th + Math.PI / 2 });
+        }
+        if (o < 0.12) return;
+      }
 
-        const vPhase = (this._variant || 0) * 40;
-        for (let i = 0; i < numPetals; i++) {
-          const baseAngle = (i / numPetals) * 2 * Math.PI;
-          const layers = [1.0, 0.78];
-          // Each individual's ray petals differ in length (smooth, non-repeating pattern)
-          const irregular = 1.0 + 0.16 * Math.sin(i * 2.7 + vPhase) + 0.08 * Math.sin(i * 5.3 + vPhase * 1.7);
-
-          layers.forEach((layerScale, lIdx) => {
-            const angle = baseAngle + (lIdx * Math.PI / numPetals);
-            const petalReach = maxLen * layerScale * irregular;
-
-            for (let seg = 1; seg <= 4; seg++) {
-              const segFrac = seg / 4.0;
-              const rDist = (rDisc * 0.92) + (segFrac * petalReach);
-              const curl = Math.sin(segFrac * Math.PI + i * 0.8) * 5 * s;
-              const px = cx + Math.cos(angle) * rDist - Math.sin(angle) * curl;
-              const py = fcy + Math.sin(angle) * (rDist * 0.88) + Math.cos(angle) * curl;
-
-              const ch = seg === 4 ? (lIdx === 0 ? "{" : "}") : glyphsChoice[(i * 2 + seg) % glyphsChoice.length];
-              const col = seg >= 3 ? pal.petal : pal.petalWarm;
-
-              out.push({
-                x: px,
-                y: py,
-                char: ch,
-                fg: col,
-                size: Math.max(10, Math.round((11 + seg * 1.8) * s)),
-                rot: angle + Math.PI / 2
-              });
-            }
+      // Ray florets: strap-shaped, slightly irregular per individual, foreshortened by tilt
+      if (o > 0.08) {
+        const nR = s >= 1.0 ? 34 : 21;
+        for (let i = 0; i < nR; i++) {
+          const a = (i / nR) * Math.PI * 2 + vPhase * 0.013;
+          const irr = 1 + 0.16 * Math.sin(i * 2.7 + vPhase) + 0.08 * Math.sin(i * 5.3 + vPhase * 1.7);
+          const fore = Math.hypot(Math.cos(a), Math.sin(a) * ky);
+          const ang = Math.atan2(Math.sin(a) * ky, Math.cos(a));
+          const bx = cx + Math.cos(a) * rD * 0.9;
+          const by = fcy + Math.sin(a) * rD * 0.9 * ky;
+          drawLamina(out, bx, by, ang, 34 * s * o * irr * fore, 4.6 * s, LAMINA.lanceolate, {
+            edge: i % 2 ? pal.petal : pal.petalWarm, edgeStyle: 'line', size: Math.max(8, 9.5 * s), curl: 0.12 * Math.sin(i * 1.3 + vPhase)
           });
         }
       }
+
+      // Disc florets: dark seeds at the centre, opening (pollen) florets at the rim
+      const nF = Math.min(130, Math.floor(80 * (0.35 + 0.65 * o) * Math.max(0.6, s * s)));
+      for (let k = 0; k < nF; k++) {
+        const rf = Math.sqrt((k + 0.5) / nF);
+        const r = rf * rD;
+        const th = k * golden + vPhase * 0.02;
+        let ch;
+        let col;
+        if (rf < 0.35) { ch = k % 3 === 0 ? '8' : '&'; col = pal.coreDeep; }
+        else if (rf < 0.8) { ch = k % 2 === 0 ? '*' : '#'; col = pal.core; }
+        else { ch = 'o'; col = pal.petalWarm; }
+        out.push({ x: cx + Math.cos(th) * r, y: fcy + Math.sin(th) * r * ky, char: ch, fg: col, size: Math.max(7, (7.5 + (1 - rf) * 3) * s) });
+      }
     }
 
-    static _buildHibiscus(out, cx, cy, s, b, pal, time) {
+    /**
+     * Hibiscus: five broad, overlapping obovate petals with a dark eye, a long staminal
+     * column carrying anthers and five stigma pads. In bud the petals are a twisted
+     * green spindle inside the calyx.
+     */
+    static _buildHibiscus(out, cx, cy, s, b, pal, P, variant) {
       const fcy = cy - 25 * s;
-      const rows = [
-        ["           /!/          ", pal.outer],
-        ["     /**%/ 1@@@@@@1****- ", pal.outer],
-        [" ****%) )/ @@@@@@@#@& !&#", pal.mid],
-        ["@@@/ /%*======@@@/#&/ /**%", pal.mid],
-        ["@@@// /#**%) #######/#//**", pal.inner],
-        [" |##/@///#%#@@@@@@@@@@/|@@@/**#", pal.inner],
-        [" #@ /(@############/==*###", pal.mid],
-        [" % |##@@@@@@#@@@/@@######*", pal.mid],
-        [" *@@@&%@--@@### / | */ ", pal.outer],
-        ["   **@@@%# / *%&-#*%%   ", pal.outer],
-        ["          | |@@@#*      ", pal.mid]
-      ];
-      const spX = 9.0 * s * (0.5 + 0.5 * b);
-      const spY = 12.5 * s * (0.5 + 0.5 * b);
-      const startY = fcy - (rows.length * spY) / 2.0;
+      const o = smoothstep(0.15, 1.0, b);
+      const ky = 0.82;
+      const ph = (variant || 0) * 1.2;
 
-      rows.forEach((row, rIdx) => {
-        const text = row[0];
-        const col = row[1];
-        const ly = startY + rIdx * spY;
-        const startX = cx - (text.length * spX) / 2.0;
-        for (let cIdx = 0; cIdx < text.length; cIdx++) {
-          const ch = text[cIdx];
-          if (ch !== ' ') {
-            out.push({ x: startX + cIdx * spX, y: ly, char: ch, fg: col, size: 13.5 * s });
-          }
-        }
+      // Calyx lobes
+      for (let k = 0; k < 5; k++) {
+        const a = lerp(-Math.PI / 2 + (k - 2) * 0.22, Math.PI / 2 + (k - 2) * 0.45, o * 0.7);
+        drawLamina(out, cx, fcy + 4 * s, a, 9 * s, 2.4 * s, LAMINA.lanceolate, { edge: P.stemDark, size: Math.max(8, 8 * s + 1) });
+      }
+
+      // Petals: draw the upper (back) ones first so the front ones overlap them
+      const petals = [];
+      for (let k = 0; k < 5; k++) {
+        const aOpen = -Math.PI / 2 + 0.3 + (k * 2 * Math.PI) / 5 + ph;
+        const aBud = -Math.PI / 2 + (k - 2) * 0.1;
+        petals.push({ k, a: lerp(aBud, aOpen, o) });
+      }
+      petals.sort((p, q) => Math.sin(p.a) - Math.sin(q.a));
+      const fill = u => (u < 0.3 ? ripen(pal.inner, b, P) : (u < 0.62 ? ripen(pal.mid, b, P) : ripen(pal.outer, b, P)));
+      petals.forEach(({ k, a }) => {
+        const fore = Math.hypot(Math.cos(a), Math.sin(a) * ky);
+        const ang = Math.atan2(Math.sin(a) * ky, Math.cos(a));
+        const L = 33 * s * (0.45 + 0.55 * o) * lerp(1, fore, o);
+        const W = 15 * s * (0.2 + 0.8 * o);
+        drawLamina(out, cx, fcy, ang, L, W, LAMINA.obovate, {
+          edge: ripen(pal.outer, b, P), fill, hatch: 2, texture: ['@', '#', '*', '%'], rib: ripen(pal.inner, b, P), ribTo: 0.4,
+          curl: 0.25 * (1 - o) + 0.1 * Math.sin(k * 2.1 + ph), size: Math.max(8, 10 * s)
+        });
       });
 
-      // Golden stamen pushes forward as flower blooms!
-      if (b > 0.3) {
-        const stamenProgress = (b - 0.3) / 0.7;
-        const stamenPts = [
-          { dx: -6 * s * stamenProgress, dy: 5 * s, ch: '%' },
-          { dx: -18 * s * stamenProgress, dy: -4 * s, ch: '/' },
-          { dx: -30 * s * stamenProgress, dy: -16 * s, ch: '(' },
-          { dx: -42 * s * stamenProgress, dy: -28 * s, ch: '~' },
-          { dx: -52 * s * stamenProgress, dy: -38 * s, ch: 'o' },
-          { dx: -58 * s * stamenProgress, dy: -44 * s, ch: '*' }
-        ];
-        stamenPts.forEach(pt => {
-          out.push({ x: cx + pt.dx, y: fcy + pt.dy, char: pt.ch, fg: pal.stamen, size: 15 * s });
-        });
-      }
-    }
-
-    static _buildIris(out, cx, cy, s, b, pal, time) {
-      const fcy = cy - 20 * s;
-      const standardsLeft = [
-        { dx: -16 * s * b, dy: -20 * s, txt: "((" },
-        { dx: -20 * s * b, dy: -36 * s, txt: "%%%" },
-        { dx: -22 * s * b, dy: -54 * s, txt: "@@@" },
-        { dx: -18 * s * b, dy: -72 * s, txt: "((((" },
-        { dx: -10 * s * b, dy: -84 * s, txt: "\\\\" }
-      ];
-      const standardsRight = [
-        { dx: 16 * s * b, dy: -20 * s, txt: "))" },
-        { dx: 20 * s * b, dy: -36 * s, txt: "%%%" },
-        { dx: 22 * s * b, dy: -54 * s, txt: "@@@" },
-        { dx: 18 * s * b, dy: -72 * s, txt: "))))" },
-        { dx: 10 * s * b, dy: -84 * s, txt: "//" }
-      ];
-      [...standardsLeft, ...standardsRight].forEach(pt => {
-        for (let i = 0; i < pt.txt.length; i++) {
-          out.push({
-            x: cx + pt.dx + i * 7.5 * s,
-            y: fcy + pt.dy,
-            char: pt.txt[i],
-            fg: pal.standard,
-            size: 14 * s
-          });
+      // Staminal column
+      if (o > 0.35) {
+        const grow = smoothstep(0.35, 1, o);
+        const colLen = 36 * s * grow;
+        const ca = -Math.PI / 2 + 0.55 + 0.1 * Math.sin(ph);
+        const pts = [];
+        for (let j = 0; j <= 8; j++) {
+          const u = j / 8;
+          pts.push({ x: cx + Math.cos(ca) * colLen * u + 6 * s * u * u, y: fcy + Math.sin(ca) * colLen * u - 3 * s * u * u });
         }
-      });
-
-      // Iris Falls: cascade downwards from throat in bounded ribbons
-      const fallSteps = Math.floor(9 + 5 * b);
-      for (let side of [-1, 1]) {
-        for (let i = 0; i <= fallSteps; i++) {
-          const ft = i / fallSteps;
-          const fx = cx + side * (12 * s + ft * 20 * s * b);
-          const fy = fcy - 4 * s + (ft * 34 * s * b) + Math.sin(ft * Math.PI) * 6 * s;
-          const ch = i === fallSteps ? (side < 0 ? "\\" : "/") : (i % 3 === 0 ? "@" : (i % 3 === 1 ? "#" : "%"));
-          const col = (i % 2 === 0 ? pal.fall : pal.standard);
-          out.push({ x: fx, y: fy, char: ch, fg: col, size: Math.max(10, Math.round((12 + ft * 3) * s)) });
-        }
-      }
-
-      if (b > 0.4) {
-        const throat = [{ dy: -12 * s, txt: "|(@/9|" }, { dy: -2 * s, txt: "|%&%#|" }, { dy: 8 * s, txt: "\\b)|" }];
-        throat.forEach(tr => {
-          for (let i = 0; i < tr.txt.length; i++) {
-            const ch = tr.txt[i];
-            const col = ((ch === '@' || ch === '9' || ch === '&') ? pal.signal : pal.deep);
-            out.push({ x: cx + (i - tr.txt.length / 2) * 8 * s, y: fcy + tr.dy, char: ch, fg: col, size: 14 * s });
+        strokeAlong(out, pts, pal.stamen, Math.max(8, 9 * s));
+        for (let j = 5; j <= 7; j++) {
+          for (const sd of [-1, 1]) {
+            out.push({ x: pts[j].x + sd * 3 * s, y: pts[j].y + sd * 1.5 * s, char: '*', fg: pal.anther, size: Math.max(7, 8 * s) });
           }
-        });
-      }
-    }
-
-    static _buildThistle(out, cx, cy, s, b, pal, time) {
-      const fcy = cy - 15 * s;
-      const calyxChars = [":", ";", "%", "&", "#", "@", "|"];
-      const rCalyx = 26 * s;
-      for (let dy = 0; dy <= rCalyx * 1.3; dy += 6) {
-        const widthAtY = Math.sin((dy / (rCalyx * 1.3)) * Math.PI) * rCalyx;
-        for (let dx = -Math.floor(widthAtY); dx <= Math.floor(widthAtY); dx += 7) {
-          const ch = calyxChars[(Math.abs(dx + dy)) % calyxChars.length];
-          out.push({ x: cx + dx, y: fcy + dy, char: ch, fg: pal.calyx, size: 12.5 * s });
         }
-      }
-      for (let plume = -4; plume <= 4; plume++) {
-        const pAngle = (plume / 5.0) * 0.75 - Math.PI / 2.0;
-        for (let step = 1; step <= 7; step++) {
-          const dist = step * 11 * s * b;
-          const px = cx + Math.cos(pAngle) * dist;
-          const py = fcy + Math.sin(pAngle) * dist;
-          const ch = step >= 5 ? '!' : '|';
-          const col = (step >= 4 ? pal.brush : pal.brushDark);
-          out.push({ x: px, y: py, char: ch, fg: col, size: 14 * s, rot: pAngle + Math.PI / 2 });
+        const tip = pts[8];
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2;
+          out.push({ x: tip.x + Math.cos(a) * 3 * s, y: tip.y + Math.sin(a) * 3 * s - 2 * s, char: 'o', fg: pal.inner, size: Math.max(7, 7 * s) });
         }
       }
     }
 
     /**
-     * Bounded Marigold Architecture:
-     * Multi-tiered ruffled concentric domes of yellow, orange, and crimson frilled petals.
-     * Perfectly radial and hemispherical with zero rectangular edge spill.
+     * Bearded iris: three upright standards arching inward, three falls flaring out and
+     * curling under with a fuzzy yellow beard, pale style arms over the falls.
+     * In bud all six fold into a narrow spear.
      */
-    static _buildMarigold(out, cx, cy, s, b, pal, time) {
-      const fcy = cy - 20 * s;
-      const numTiers = Math.floor(4 + 3 * b);
-      const maxR = 30 * s * b;
-      const chars = ["{", "}", "~", "%", "@", "#", "="];
-
-      for (let tier = 1; tier <= numTiers; tier++) {
-        const tierFrac = tier / numTiers;
-        const tierR = tierFrac * maxR;
-        const petalCount = Math.floor(6 + tier * 5);
-        const col = (tierFrac < 0.4 ? pal.yellow : (tierFrac < 0.75 ? pal.orange : pal.crimson));
-
-        for (let p = 0; p < petalCount; p++) {
-          const ang = (p / petalCount) * 2 * Math.PI + (tier * 0.4);
-          const r = tierR * (0.85 + 0.15 * Math.sin(p * 3 + tier + (this._variant || 0) * 30));
-          const px = cx + Math.cos(ang) * r;
-          const py = fcy + Math.sin(ang) * (r * 0.75);
-          const ch = chars[(tier * 2 + p) % chars.length];
-          out.push({
-            x: px,
-            y: py,
-            char: ch,
-            fg: col,
-            size: Math.max(10, Math.round((11 + tier * 1.2) * s)),
-            rot: ang + Math.PI / 2
-          });
-        }
-      }
-    }
-
-    static _buildDaffodil(out, cx, cy, s, b, pal, time) {
-      const fcy = cy - 20 * s;
-      const gridChars = ["#", "*", "%", "#", "*"];
-      for (let dy = -2; dy <= 2; dy++) {
-        for (let dx = -2; dx <= 2; dx++) {
-          const ch = gridChars[(Math.abs(dx + dy)) % gridChars.length];
-          const col = (dx === 0 && dy === 0) ? (pal.inner) : (pal.cup);
-          out.push({ x: cx + dx * 9 * s, y: fcy + dy * 9 * s, char: ch, fg: col, size: 13.5 * s });
-        }
-      }
-      for (let i = 0; i < 6; i++) {
-        const ang = (i / 6.0) * 2 * Math.PI;
-        for (let step = 1; step <= 5; step++) {
-          const dist = 18 * s + step * 10 * s * b;
-          const px = cx + Math.cos(ang) * dist;
-          const py = fcy + Math.sin(ang) * dist;
-          const ch = step === 5 ? '*' : (step >= 3 ? '^' : '+');
-          out.push({ x: px, y: py, char: ch, fg: pal.petal, size: 14 * s, rot: ang + Math.PI / 2 });
-        }
-      }
-    }
-
-    /**
-     * Dense English Rose Architecture:
-     * Multi-tiered concentric spiraling whorls, velvet Fermat core, cupped mid petals,
-     * scalloped outer reflexed petals, and basal sepals.
-     */
-    static _buildRose(out, cx, cy, s, b, pal, time) {
+    static _buildIris(out, cx, cy, s, b, pal, P) {
       const fcy = cy - 22 * s;
+      const o = smoothstep(0.12, 1.0, b);
+      const closed = -Math.PI / 2;
 
-      // 1. Basal protective sepals wrapping the rose cup
-      const sepalPoints = [
-        { dx: -18 * s, dy: 14 * s, ch: '\\' },
-        { dx: -9 * s, dy: 18 * s, ch: '\\' },
-        { dx: 0, dy: 20 * s, ch: 'v' },
-        { dx: 9 * s, dy: 18 * s, ch: '/' },
-        { dx: 18 * s, dy: 14 * s, ch: '/' }
-      ];
-      sepalPoints.forEach(sp => {
-        out.push({
-          x: cx + sp.dx,
-          y: fcy + sp.dy,
-          char: sp.ch,
-          fg: (pal.sepal || '#4ba032'),
-          size: 14 * s
+      const falls = [{ a: Math.PI - 0.45, len: 38, c: -1 }, { a: 0.45, len: 38, c: 1 }, { a: Math.PI / 2, len: 21, c: 0 }];
+      falls.forEach((f, i) => {
+        const ang = lerp(closed + (i - 1) * 0.08, f.a, o);
+        const L = f.len * s * (0.55 + 0.45 * o);
+        const W = 11 * s * (0.3 + 0.7 * o);
+        const curl = f.c * 0.45 * o;
+        drawLamina(out, cx, fcy, ang, L, W, LAMINA.obovate, {
+          edge: ripen(pal.fall, b, P), fill: ripen(pal.deep, b, P), hatch: 2, texture: ['%', '@', '#'], rib: ripen(pal.deep, b, P), curl, size: Math.max(8, 10 * s)
         });
-      });
-
-      // 2. Dense spiraling velvet core (Fibonacci / Fermat spiral)
-      const coreCount = Math.floor(20 + 16 * b);
-      const coreRMax = 15 * s * (0.35 + 0.65 * b);
-      const goldenAngle = 2.3999632;
-      const coreChars = ['@', '%', '&', '8', '0', 'Q', 'S'];
-      for (let k = 0; k < coreCount; k++) {
-        const rFrac = Math.sqrt((k + 0.5) / coreCount);
-        const r = rFrac * coreRMax;
-        const theta = k * goldenAngle;
-        const px = cx + Math.cos(theta) * r;
-        const py = fcy + Math.sin(theta) * (r * 0.72);
-        const ch = coreChars[k % coreChars.length];
-        const col = pal.dark;
-        out.push({
-          x: px,
-          y: py,
-          char: ch,
-          fg: col,
-          size: Math.max(10, Math.round((11 + (1 - rFrac) * 3) * s))
-        });
-      }
-
-      // 3. Middle overlapping cupped petals & outer scalloped whorls
-      const petalRings = [
-        { count: 4, r: 22 * s * b, chars: ['(', ')', '{', '}', '%', '&'], col: pal.petal },
-        { count: 5, r: 30 * s * b, chars: ['{', '}', '(', ')', 'S', 's'], col: pal.petal },
-        { count: 6, r: 38 * s * b, chars: ['{', '}', '~', '(', ')', 'S'], col: pal.light }
-      ];
-
-      petalRings.forEach((ring, rIdx) => {
-        const numPetals = ring.count;
-        for (let p = 0; p < numPetals; p++) {
-          const baseAng = (p / numPetals) * 2 * Math.PI + (rIdx * 0.52);
-          const span = (Math.PI * 2) / numPetals * 1.32; // natural overlapping petal arcs
-          const steps = 5;
-          for (let st = 0; st <= steps; st++) {
-            const u = (st / steps) - 0.5;
-            const ang = baseAng + u * span;
-            const cupping = Math.cos(u * Math.PI);
-            const r = ring.r * (0.84 + 0.20 * cupping);
-            const px = cx + Math.cos(ang) * r;
-            const py = fcy + Math.sin(ang) * (r * 0.74);
-            const ch = (st === 0 || st === steps)
-              ? (u < 0 ? '(' : ')')
-              : ring.chars[(p * 3 + st) % ring.chars.length];
-            out.push({
-              x: px,
-              y: py,
-              char: ch,
-              fg: ring.col,
-              size: Math.max(10, Math.round((12 + rIdx * 1.5) * s))
-            });
+        if (o > 0.3) {
+          const ca = Math.cos(ang);
+          const sa = Math.sin(ang);
+          for (let u = 0.12; u < 0.5; u += 0.09) {
+            const off = curl * L * u * u;
+            out.push({ x: cx + ca * u * L - sa * off, y: fcy + sa * u * L + ca * off, char: '*', fg: pal.signal, size: Math.max(7, 7.5 * s), rot: ang });
           }
         }
       });
+
+      const stds = [{ a: closed - 0.42, c: 1 }, { a: closed + 0.42, c: -1 }, { a: closed, c: 0, back: true }];
+      stds.forEach((st, i) => {
+        const ang = lerp(closed + (i - 1) * 0.05, st.a, o);
+        drawLamina(out, cx, fcy - 3 * s, ang, 37 * s * (0.55 + 0.45 * o) * (st.back ? 0.9 : 1), 10.5 * s * (0.35 + 0.65 * o), LAMINA.obovate, {
+          edge: ripen(pal.standard, b, P), fill: ripen(mixColor(pal.standard, pal.fall, 0.35), b, P),
+          hatch: st.back ? 0 : 1, texture: ['%', '&'], curl: st.c * 0.4 * o, size: Math.max(8, 10 * s)
+        });
+      });
+
+      if (o > 0.4) {
+        [Math.PI - 0.5, 0.5, Math.PI / 2].forEach(a => {
+          drawLamina(out, cx, fcy, a, 10 * s * o, 2.6 * s, LAMINA.lanceolate, { edge: pal.standard, size: Math.max(7, 8 * s) });
+        });
+      }
     }
 
+    /**
+     * Thistle: an urn-shaped involucre of overlapping spine-tipped bracts, crowned by a
+     * dense brush of purple florets that fans out as it opens.
+     */
+    static _buildThistle(out, cx, cy, s, b, pal, P) {
+      const fcy = cy - 10 * s;
+      const o = smoothstep(0.12, 1.0, b);
+      const H = 24 * s;
+      const W = 13 * s;
+
+      for (let r = 0; r < 6; r++) {
+        const v = r / 5;
+        const y = fcy - v * H;
+        const half = W * Math.sin(Math.PI * (0.18 + 0.7 * v)) * (1 - 0.25 * v);
+        const cols = 3 + Math.round(half / (3.5 * s));
+        for (let c = 0; c < cols; c++) {
+          const u = (c / (cols - 1)) * 2 - 1;
+          const x = cx + u * half;
+          const dir = Math.atan2(-1 - v * 0.2, u * 1.4);
+          out.push({ x, y, char: '^', fg: (r + c) % 2 ? pal.calyx : P.stemDark, size: Math.max(8, 10 * s), rot: dir + Math.PI / 2 });
+          if ((r + c) % 2 === 0) {
+            out.push({ x: x + Math.cos(dir) * 4 * s, y: y + Math.sin(dir) * 4 * s, char: "'", fg: pal.calyx, size: Math.max(7, 8 * s), rot: dir + Math.PI / 2 });
+          }
+        }
+      }
+
+      if (o > 0.05) {
+        const n = 24;
+        const topY = fcy - H;
+        for (let i = 0; i < n; i++) {
+          const t = (i / (n - 1)) * 2 - 1;
+          const phi = -Math.PI / 2 + t * (0.3 + 0.7 * o);
+          const len = 24 * s * o * (0.85 + 0.15 * Math.cos(i * 2.3));
+          const bx = cx + t * W * 0.45;
+          strokeAlong(out, [{ x: bx, y: topY + 2 * s }, { x: bx + Math.cos(phi) * len, y: topY + Math.sin(phi) * len }],
+            f => (f < 0.4 ? pal.brushDark : pal.brush), Math.max(8, 9 * s));
+          out.push({ x: bx + Math.cos(phi) * (len + 2 * s), y: topY + Math.sin(phi) * (len + 2 * s), char: '·', fg: pal.brush, size: Math.max(8, 9 * s) });
+        }
+      }
+    }
+
+    /**
+     * French marigold: a double pompon dome of ruffled florets in rings, bicolour with a
+     * mahogany base blotch and golden ruffled tips, over a green involucral tube.
+     */
+    static _buildMarigold(out, cx, cy, s, b, pal, P, variant) {
+      const fcy = cy - 20 * s;
+      const o = smoothstep(0.15, 1.0, b);
+      const ky = 0.68;
+      drawLamina(out, cx, fcy + 15 * s, -Math.PI / 2, 14 * s, 5.5 * s, LAMINA.spindle, { edge: P.stemDark, fill: P.stem, hatch: 1, size: Math.max(8, 9 * s) });
+      if (o < 0.1) {
+        out.push({ x: cx, y: fcy - 1 * s, char: '*', fg: ripen(pal.orange, b, P), size: Math.max(8, 10 * s) });
+        return;
+      }
+      const rings = 5;
+      const Rmax = 24 * s * (0.35 + 0.65 * o);
+      const ph = (variant || 0) * 9;
+      for (let ri = rings - 1; ri >= 0; ri--) {
+        const f = (ri + 1) / rings;
+        const R = Rmax * f;
+        const lift = (1 - f) * 11 * s * o;
+        const n = 6 + Math.round(9 * f);
+        const tipCol = ripen(f > 0.6 ? pal.orange : pal.yellow, b, P);
+        const baseCol = ripen(pal.crimson, b, P);
+        for (let p = 0; p < n; p++) {
+          const a = (p / n) * Math.PI * 2 + ri * 0.45 + ph;
+          const x0 = cx + Math.cos(a) * R * 0.55;
+          const y0 = fcy + Math.sin(a) * R * 0.55 * ky - lift;
+          const ang = Math.atan2(Math.sin(a) * ky, Math.cos(a));
+          const fore = Math.hypot(Math.cos(a), Math.sin(a) * ky);
+          const len = (R * 0.5 + 4 * s) * fore;
+          strokeAlong(out, [{ x: x0, y: y0 }, { x: x0 + Math.cos(ang) * len, y: y0 + Math.sin(ang) * len }],
+            fr => (fr < 0.45 ? baseCol : tipCol), Math.max(8, 10 * s), { chars: ['%', '&', '@', '#'], phase: p + ri });
+          out.push({ x: x0 + Math.cos(ang) * (len + 1.5 * s), y: y0 + Math.sin(ang) * (len + 1.5 * s), char: '~', fg: tipCol, size: Math.max(8, 9.5 * s), rot: ang + Math.PI / 2 });
+        }
+      }
+    }
+
+    /**
+     * Daffodil: seen from the side, six tepals radiate as a foreshortened star around a
+     * long, ruffled trumpet (corona) that points the way the flower faces; a dry papery
+     * spathe sits behind. The bud points sideways from the spathe.
+     */
+    static _buildDaffodil(out, cx, cy, s, b, pal, P, variant) {
+      const face = (variant || 0) < 0.5 ? -1 : 1;
+      const fcy = cy - 18 * s;
+      const o = smoothstep(0.15, 1.0, b);
+      const spathe = mixColor(P.wilted || P.stemDark, P.stem, 0.35);
+      drawLamina(out, cx - face * 2 * s, fcy + 6 * s, -Math.PI / 2 - face * 0.6, 15 * s, 3 * s, LAMINA.lanceolate, { edge: spathe, size: Math.max(8, 9 * s) });
+
+      if (o < 0.1) {
+        const a = face > 0 ? -0.35 : Math.PI + 0.35;
+        drawLamina(out, cx, fcy, a, 22 * s, 4.5 * s, LAMINA.spindle, { edge: ripen(pal.petal, b, P), fill: ripen(pal.cup, b, P), hatch: 1, size: Math.max(8, 10 * s) });
+        return;
+      }
+
+      const kx = 0.55;
+      for (let k = 0; k < 6; k++) {
+        const a = (k * Math.PI) / 3 + Math.PI / 6;
+        const dx = Math.cos(a) * kx;
+        const dy = Math.sin(a);
+        const fore = Math.hypot(dx, dy);
+        drawLamina(out, cx, fcy, Math.atan2(dy, dx), 28 * s * o * fore, 8 * s * (0.4 + 0.6 * o), LAMINA.tepal, {
+          edge: ripen(pal.petal, b, P), fill: ripen(pal.petal, b, P), hatch: 1, texture: ['+', '*'], size: Math.max(8, 9.5 * s)
+        });
+      }
+
+      const T = 25 * s * (0.35 + 0.65 * o);
+      const R = 9.5 * s * (0.55 + 0.45 * o);
+      const ring = (ax, rr, ruff) => {
+        const pts = [];
+        for (let j = 0; j <= 16; j++) {
+          const th = (j / 16) * Math.PI * 2;
+          const rad = rr * (1 + ruff * Math.sin(th * 9));
+          pts.push({ x: ax + Math.cos(th) * rad * 0.38, y: fcy + Math.sin(th) * rad });
+        }
+        return pts;
+      };
+      const cup = ripen(pal.cup, b, P);
+      strokeAlong(out, [{ x: cx, y: fcy - R * 0.85 }, { x: cx + face * T, y: fcy - R * 1.15 }], cup, Math.max(8, 9 * s));
+      strokeAlong(out, [{ x: cx, y: fcy + R * 0.85 }, { x: cx + face * T, y: fcy + R * 1.15 }], cup, Math.max(8, 9 * s));
+      for (let j = 0; j < 4; j++) {
+        const t = j / 3;
+        strokeAlong(out, ring(cx + face * T * t, R * (0.85 + 0.3 * t * t), j === 3 ? 0.12 : 0), j === 0 ? ripen(pal.inner, b, P) : cup, Math.max(8, 9 * s), { char: j === 3 ? '~' : '(' });
+      }
+      strokeAlong(out, ring(cx + face * T, R * 0.65, 0), ripen(pal.inner, b, P), Math.max(7, 8 * s), { chars: ['#', '%'] });
+    }
+
+    /**
+     * Rose: petals in a golden-angle spiral, inner ones cupped tight and upright, outer
+     * ones wide with reflexed lips; five slender sepals wrap the bud and reflex as the
+     * flower opens. A closed bud is the same spiral, tall and narrow.
+     */
+    static _buildRose(out, cx, cy, s, b, pal, P, variant) {
+      const fcy = cy - 22 * s;
+      const o = smoothstep(0.12, 1.0, b);
+      const ky = 0.7;
+
+      for (let k = 0; k < 5; k++) {
+        const a = lerp(-Math.PI / 2 + (k - 2) * 0.28, Math.PI / 2 + (k - 2) * 0.62, smoothstep(0.1, 0.7, o));
+        drawLamina(out, cx + (k - 2) * 2 * s, fcy + 10 * s, a, 17 * s, 2.4 * s, LAMINA.lanceolate, { edge: pal.sepal, size: Math.max(8, 9 * s + 1), curl: (k - 2) * 0.1 });
+      }
+
+      const N = 7 + Math.round(19 * o);
+      const rMax = 29 * s * (0.3 + 0.7 * o);
+      const cupH = (5 + 18 * (1 - o)) * s;
+      const ph = (variant || 0) * 6.28;
+      const arc = (phi, rr, span, dy) => {
+        const pts = [];
+        for (let j = 0; j <= 8; j++) {
+          const a = phi - span / 2 + (span * j) / 8;
+          const bulge = 1 + 0.07 * Math.sin((j / 8) * Math.PI);
+          pts.push({ x: cx + Math.cos(a) * rr * bulge, y: fcy + Math.sin(a) * rr * bulge * ky - dy });
+        }
+        return pts;
+      };
+      for (let k = N - 1; k >= 0; k--) {
+        const f = (k + 1) / N;
+        const r = rMax * Math.sqrt(f);
+        const phi = k * 2.3999632 + ph;
+        const lift = (1 - f) * cupH;
+        const span = (0.8 + 1.5 * f) * (0.55 + 0.45 * o);
+        const col = f < 0.3 ? pal.dark : (f < 0.72 ? pal.petal : pal.light);
+        strokeAlong(out, arc(phi, r, span, lift), ripen(col, b, P), Math.max(8, (10 + 3 * f) * s), { chars: ['(', '{', '('], align: 'tangent', phase: k });
+        if (f > 0.35) strokeAlong(out, arc(phi, r * 0.84, span * 0.8, lift + 2 * s), ripen(mixColor(col, pal.dark, 0.5), b, P), Math.max(8, 9.5 * s), { chars: ['%', '@', '&'], phase: k });
+        if (o > 0.55 && f > 0.72) {
+          out.push({ x: cx + Math.cos(phi) * r * 1.08, y: fcy + Math.sin(phi) * r * 1.08 * ky - lift, char: '~', fg: pal.light, size: Math.max(8, 10 * s), rot: phi + Math.PI / 2 });
+        }
+      }
+    }
+
+    /**
+     * Dandelion in flower: a flat golden head of many strap-shaped ray florets in rings,
+     * outer green bracts reflexed below. The bud is a closed green spindle.
+     */
+    static _buildDandelionFlower(out, cx, cy, s, b, pal, P) {
+      const fcy = cy - 18 * s;
+      const o = smoothstep(0.12, 1.0, b);
+      const ky = 0.72;
+      for (let k = 0; k < 8; k++) {
+        const a = lerp(-Math.PI / 2 + (k - 3.5) * 0.15, Math.PI / 2 + (k - 3.5) * 0.32, o);
+        strokeAlong(out, [{ x: cx, y: fcy + 5 * s }, { x: cx + Math.cos(a) * 9 * s, y: fcy + 5 * s + Math.sin(a) * 9 * s }], P.stem, Math.max(8, 8 * s));
+      }
+      if (o < 0.1) {
+        drawLamina(out, cx, fcy + 6 * s, -Math.PI / 2, 16 * s, 4.5 * s, LAMINA.spindle, { edge: P.stem, fill: ripen(pal.yellow, b, P), hatch: 1, size: Math.max(8, 9 * s) });
+        return;
+      }
+      const R = 20 * s * (0.3 + 0.7 * o);
+      const yellow = ripen(pal.yellow, b, P);
+      const deep = ripen(mixColor(pal.yellow, pal.core, 0.3), b, P);
+      for (let ring = 3; ring >= 0; ring--) {
+        const f = (ring + 1) / 4;
+        const n = 10 + ring * 7;
+        for (let p = 0; p < n; p++) {
+          const a = (p / n) * Math.PI * 2 + ring * 0.37;
+          const r0 = R * f * 0.5;
+          const r1 = R * f;
+          const p0 = { x: cx + Math.cos(a) * r0, y: fcy + Math.sin(a) * r0 * ky - (1 - f) * 4 * s };
+          const p1 = { x: cx + Math.cos(a) * r1, y: fcy + Math.sin(a) * r1 * ky - (1 - f) * 4 * s };
+          strokeAlong(out, [p0, p1], ring < 1 ? deep : yellow, Math.max(7, 8.5 * s));
+        }
+      }
+    }
+
+    /**
+     * Dandelion seed clock: a Fibonacci sphere of parachute seeds (beak + pappus tuft),
+     * seeds on the far side dimmer. After the seeds are blown, a bare receptacle with a
+     * few stragglers remains.
+     */
     static _buildDandelion(out, cx, cy, s, b, pal, time, seedsBlown = false) {
       const fcy = cy - 20 * s;
+      out.push({ x: cx, y: fcy, char: '@', fg: pal.core, size: Math.max(8, 10 * s) });
 
-      // Core receptacle
-      out.push({ x: cx, y: fcy, char: '(#)', fg: pal.core, size: 15 * s });
-
-      // If seeds were blown away, show bare seedhead with a few stragglers
       if (seedsBlown) {
         for (let i = 0; i < 6; i++) {
           const ang = (i / 6) * 2 * Math.PI;
@@ -2219,211 +2511,78 @@
         return;
       }
 
-      // Full dandelion fluffy seed clock
-      const numSeeds = Math.floor(18 + 18 * b);
-      const rClock = 42 * s * b;
-      for (let i = 0; i < numSeeds; i++) {
-        const ang = (i / numSeeds) * 2 * Math.PI;
-        const r = rClock * (0.8 + 0.2 * Math.sin(i * 3));
-        const px = cx + Math.cos(ang) * r;
-        const py = fcy + Math.sin(ang) * r;
-        const ch = (i % 3 === 0) ? '*' : ((i % 3 === 1) ? '·' : "'");
-        out.push({ x: px, y: py, char: ch, fg: pal.seed, size: 13 * s, rot: ang + Math.PI / 2 });
+      const o = smoothstep(0.1, 1.0, b);
+      const R = 26 * s * (0.35 + 0.65 * o);
+      const N = 52;
+      for (let i = 0; i < N; i++) {
+        const z = 1 - (2 * (i + 0.5)) / N;
+        const rxy = Math.sqrt(1 - z * z);
+        const th = i * 2.3999632;
+        const X = Math.cos(th) * rxy;
+        const Z = Math.sin(th) * rxy;
+        const back = Z < 0;
+        const beak = mixColor(pal.seed, pal.core, back ? 0.7 : 0.4);
+        strokeAlong(out, [{ x: cx + X * R * 0.18, y: fcy - z * R * 0.18 }, { x: cx + X * R * 0.8, y: fcy - z * R * 0.8 }], beak, Math.max(7, 7 * s + 1), { spacing: 6 * s + 1 });
+        out.push({ x: cx + X * R, y: fcy - z * R, char: '*', fg: back ? mixColor(pal.seed, pal.core, 0.45) : pal.seed, size: Math.max(7, 9 * s), rot: Math.atan2(-z, X) + Math.PI / 2 });
       }
     }
 
     /**
-     * Dense Sculpted Tulip Chalice Architecture:
-     * Elegant goblet chalice with vertical striations, golden internal stamens,
-     * basal receptacle, and flaring crown tepal tips.
+     * Tulip goblet: three inner tepals behind three outer ones, rounded with pointed
+     * tips; closed and egg-shaped at first, flaring open in full bloom to show the
+     * dark stamens. Buds are green and colour up.
      */
-    static _buildTulip(out, cx, cy, s, b, pal, time) {
-      const fcy = cy - 22 * s;
-      const cupHeight = 44 * s;
-      const flare = 0.75 + 0.35 * b;
-      const maxW = 21 * s * flare;
-      const numLayers = 8;
+    static _buildTulip(out, cx, cy, s, b, pal, P) {
+      const fcy = cy - 16 * s;
+      const o = smoothstep(0.15, 1.0, b);
+      const H = 38 * s * (0.55 + 0.45 * smoothstep(0, 0.4, b));
+      const W = 11 * s;
+      const petal = ripen(pal.petal, b, P);
+      const inner = ripen(pal.inner, b, P);
 
-      // 1. Glowing Interior Stamens (3 golden anthers on dark filaments)
-      for (let st = -1; st <= 1; st++) {
-        const sx = cx + st * 6 * s * flare;
-        // Filament
-        for (let sy = 0; sy < 3; sy++) {
-          out.push({
-            x: sx,
-            y: fcy - (8 + sy * 5.5) * s,
-            char: '|',
-            fg: '#8a6010',
-            size: 13 * s
-          });
-        }
-        // Anther head
-        out.push({
-          x: sx,
-          y: fcy - (23 + Math.abs(st) * 3) * s,
-          char: '*',
-          fg: pal.stamen,
-          size: 14 * s
+      [-1, 0, 1].forEach(k => {
+        drawLamina(out, cx + k * 4 * s, fcy, -Math.PI / 2 + k * (0.15 + 0.45 * o), H * 1.02, W * 0.9, LAMINA.tepal, {
+          edge: inner, fill: inner, hatch: 1, texture: ['%', '#'], curl: -k * 0.25 * (1 - o), size: Math.max(8, 10 * s)
         });
-      }
+      });
 
-      // 2. Dense Chalice Body & Petal Striations (layer by layer from base to rim)
-      for (let li = 0; li < numLayers; li++) {
-        const vFrac = li / (numLayers - 1); // 0 = base, 1 = rim
-        const ly = fcy + 12 * s - vFrac * cupHeight;
-        const cupProfile = Math.sin(vFrac * 0.86 * Math.PI);
-        const layerW = (7 * s) + (maxW * cupProfile);
-
-        // Left petal contour
-        const leftChar = vFrac > 0.85 ? '/' : (vFrac > 0.3 ? '(' : '\\');
-        const outerCol = pal.petal;
-        out.push({ x: cx - layerW, y: ly, char: leftChar, fg: outerCol, size: 14 * s });
-
-        // Right petal contour
-        const rightChar = vFrac > 0.85 ? '\\' : (vFrac > 0.3 ? ')' : '/');
-        out.push({ x: cx + layerW, y: ly, char: rightChar, fg: outerCol, size: 14 * s });
-
-        // Interior shading & vertical striations
-        const innerSteps = Math.max(1, Math.floor(layerW / (5.2 * s)));
-        for (let j = -innerSteps + 1; j < innerSteps; j++) {
-          const u = j / innerSteps;
-          const ix = cx + u * layerW * 0.88;
-          let ch = '|';
-          let col = pal.inner;
-          if (Math.abs(u) < 0.25) {
-            ch = (li % 2 === 0) ? '|' : '!';
-            col = pal.petal;
-          } else if (Math.abs(u) < 0.65) {
-            ch = (u < 0) ? '(' : ')';
-            col = (li > 4) ? (pal.petal) : (pal.inner);
-          } else {
-            ch = (li % 2 === 0) ? '%' : '#';
-            col = pal.inner;
-          }
-          out.push({ x: ix, y: ly, char: ch, fg: col, size: 13.5 * s });
+      if (o > 0.45) {
+        for (let k = -1; k <= 1; k++) {
+          const tx = cx + k * 5 * s;
+          strokeAlong(out, [{ x: tx, y: fcy - 2 * s }, { x: tx + k * 2 * s, y: fcy - 16 * s }], mixColor(P.stemDark, pal.inner, 0.5), Math.max(7, 8 * s));
+          out.push({ x: tx + k * 2 * s, y: fcy - 18 * s, char: '*', fg: pal.stamen, size: Math.max(8, 9 * s) });
         }
       }
 
-      // 3. Flared Crown Tepal Tips
-      for (let t = -2; t <= 2; t++) {
-        const tx = cx + t * (maxW * 0.42);
-        const ty = fcy - 32 * s - (1 - Math.abs(t) * 0.25) * 6 * s;
-        const ch = (t === 0) ? '^' : (t < 0 ? '/' : '\\');
-        out.push({ x: tx, y: ty, char: ch, fg: pal.petal, size: 14 * s });
-      }
+      [-1, 1, 0].forEach(k => {
+        drawLamina(out, cx + k * 5 * s, fcy + 2 * s, -Math.PI / 2 + k * (0.12 + 0.7 * o), H, W * (k === 0 ? 1.1 : 0.95), LAMINA.tepal, {
+          edge: petal, fill: k === 0 ? mixColor(petal, inner, 0.3) : petal, hatch: 2, texture: ['!', '|', '%'], rib: inner,
+          curl: -k * 0.35 * (1 - o * 0.6), size: Math.max(8, 10 * s)
+        });
+      });
     }
 
     /**
-     * Dense Venus Flytrap (Dionaea muscipula) Architecture:
-     * Realistic bivalve trap with green basal hinge, crimson digestive glandular carpet,
-     * sensitive trigger spines, and bristling marginal cilia needle teeth!
+     * Venus flytrap flower: a small umbel of white five-petalled flowers with green
+     * centres, held high above the traps on a thin scape.
      */
-    static _buildFlytrap(out, cx, cy, s, b, pal, time) {
-      const fcy = cy - 20 * s;
-      const isOpen = b > 0.3;
-      const openSpread = isOpen ? (0.6 + 0.4 * b) : 0.2;
-
-      // 1. Basal Hinge & Winged Petiole Joint
-      for (let hx = -2; hx <= 2; hx++) {
-        out.push({
-          x: cx + hx * 6 * s,
-          y: fcy + 14 * s,
-          char: '#',
-          fg: pal.jaw,
-          size: 13.5 * s
-        });
-        out.push({
-          x: cx + hx * 5 * s,
-          y: fcy + 18 * s,
-          char: (hx === 0 ? 'v' : (hx < 0 ? '\\' : '/')),
-          fg: pal.jaw,
-          size: 13.5 * s
-        });
-      }
-
-      // 2. Dual Bivalve Lobes: Left (-1) and Right (+1)
-      for (let side of [-1, 1]) {
-        const lobeAngle = side * (0.34 + 0.34 * openSpread);
-        const lobeLen = 32 * s;
-        const lobeW = 16 * s;
-
-        const numSteps = 7;
-        for (let st = 1; st <= numSteps; st++) {
-          const frac = st / numSteps;
-          const lx = cx + Math.sin(lobeAngle) * (frac * lobeLen);
-          const ly = fcy + 12 * s - Math.cos(lobeAngle) * (frac * lobeLen);
-
-          // Outer green jaw rim (epidermis)
-          const normX = -Math.cos(lobeAngle) * side;
-          const normY = -Math.sin(lobeAngle) * side;
-          const bulge = (0.5 + 0.5 * Math.sin(frac * Math.PI));
-          const outerX = lx + normX * (lobeW * bulge);
-          const outerY = ly + normY * (lobeW * bulge);
-          const outerChar = side < 0 ? (st > 4 ? '/' : '(') : (st > 4 ? '\\' : ')');
-          out.push({
-            x: outerX,
-            y: outerY,
-            char: outerChar,
-            fg: pal.jaw,
-            size: 14 * s
-          });
-
-          // Crimson digestive glandular interior carpet
-          const glandSteps = 3;
-          for (let g = 0; g < glandSteps; g++) {
-            const gFrac = (g + 0.5) / glandSteps;
-            const gx = lx + normX * (lobeW * bulge * 0.82 * gFrac);
-            const gy = ly + normY * (lobeW * bulge * 0.82 * gFrac);
-            const gChar = (st % 2 === 0) ? (g % 2 === 0 ? '@' : '%') : (g % 2 === 0 ? '#' : '&');
-            out.push({
-              x: gx,
-              y: gy,
-              char: gChar,
-              fg: pal.inside,
-              size: 13 * s
-            });
-          }
-
-          // Sensitive trigger hairs in center of lobe cavity
-          if (st === 3 || st === 4) {
-            const tx = lx + normX * (lobeW * bulge * 0.45);
-            const ty = ly + normY * (lobeW * bulge * 0.45) - 3 * s;
-            out.push({
-              x: tx,
-              y: ty,
-              char: '!',
-              fg: '#fff677',
-              size: 12 * s
-            });
-          }
-
-          // Marginal cilia teeth (long needle bristles along outer rim)
-          const toothLen = (10 + 4 * Math.sin(frac * Math.PI)) * s;
-          const toothAng = lobeAngle + (side * (Math.PI / 2.3));
-          const toothX = outerX + Math.cos(toothAng) * toothLen;
-          const toothY = outerY + Math.sin(toothAng) * toothLen;
-          const toothChar = side < 0 ? (st % 2 === 0 ? '\\' : '!') : (st % 2 === 0 ? '/' : '!');
-          out.push({
-            x: toothX,
-            y: toothY,
-            char: toothChar,
-            fg: pal.teeth,
-            size: 13.5 * s
-          });
+    static _buildFlytrap(out, cx, cy, s, b, pal, P) {
+      const fcy = cy - 10 * s;
+      const o = smoothstep(0.15, 1.0, b);
+      const n = 4;
+      for (let k = 0; k < n; k++) {
+        const a = -Math.PI / 2 + (k - (n - 1) / 2) * 0.5;
+        const L = 12 * s * (0.6 + 0.4 * o) * (k % 2 ? 0.8 : 1);
+        const tip = { x: cx + Math.cos(a) * L, y: fcy + Math.sin(a) * L };
+        strokeAlong(out, [{ x: cx, y: fcy }, tip], P.stem, 8);
+        if (o < 0.15 || (k === n - 1 && o < 0.5)) {
+          out.push({ x: tip.x, y: tip.y, char: 'o', fg: ripen(pal.teeth, b, P), size: 8 });
+          continue;
         }
-      }
-
-      // If closed / snapped shut: interlocking teeth across the central seam
-      if (!isOpen) {
-        for (let c = -4; c <= 4; c++) {
-          out.push({
-            x: cx + c * 5 * s,
-            y: fcy - 12 * s,
-            char: (c % 2 === 0 ? '/' : '\\'),
-            fg: pal.teeth,
-            size: 14 * s
-          });
+        for (let p = 0; p < 5; p++) {
+          drawLamina(out, tip.x, tip.y, (p * 2 * Math.PI) / 5 + k, 6 * s * o + 1, 2.6 * s, LAMINA.obovate, { edge: pal.teeth, size: 8 });
         }
+        out.push({ x: tip.x, y: tip.y, char: '·', fg: pal.jaw, size: 9 });
       }
     }
   }
@@ -2787,13 +2946,14 @@
             const st = s / steps;
             const sy = gy - (s * 8);
             const sway = (windSway + pointerDeflection) * st * st + (bCurve * st);
+            const gl = stemGlyph(Math.atan2(bx + sway - prevX, 8));
             glyphs.push({
               x: bx + sway,
               y: sy,
-              char: "|",
+              char: gl.char,
               fg: st > 0.5 ? colBlade : colBladeDark,
               size: Math.round(11 + st * 2),
-              rot: Math.atan2(bx + sway - prevX, 8)
+              rot: gl.rot
             });
             prevX = bx + sway;
           }
@@ -2820,10 +2980,10 @@
             glyphs.push({
               x: bx + sway,
               y: sy,
-              char: st > 0.75 ? "~" : "|",
+              char: st > 0.75 ? "~" : stemGlyph(Math.atan2(bx + sway - prevX, Math.max(0.5, prevY - sy))).char,
               fg: st > 0.5 ? colStraw : colWilt,
               size: 11,
-              rot: st > 0.75 ? 0 : Math.atan2(bx + sway - prevX, Math.max(0.5, prevY - sy))
+              rot: st > 0.75 ? 0 : stemGlyph(Math.atan2(bx + sway - prevX, Math.max(0.5, prevY - sy))).rot
             });
             prevX = bx + sway;
             prevY = sy;
@@ -3261,7 +3421,7 @@
       let hit = false;
       const groundY = this.groundY;
       this.plants.forEach(({ x: plantX, plant }) => {
-        if (plant.type === 'dandelion' && !plant.seedsBlown && plant.age < PRIME_END && (plant.effectiveBloom > 0.35 || plant.age > 0.50)) {
+        if (plant.type === 'dandelion' && !plant.seedsBlown && plant.age < PRIME_END && plant.simulator.isSeedClock(plant.bloom, plant.effectiveBloom)) {
           const head = plant.getHeadPosition(plantX, groundY);
           const dist = Math.hypot(clickX - head.x, clickY - head.y);
           if (dist < 75) {
@@ -3767,6 +3927,7 @@
     PRNG,
     PALETTES,
     TRAIT_RANGES,
+    BOTANY,
     SPECIES,
     generateString: (options) => {
       const plant = new AsciiPlant(options);
