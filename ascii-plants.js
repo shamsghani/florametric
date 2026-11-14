@@ -2290,10 +2290,10 @@
     _setupEvents() {
       if (!this.canvas || typeof this.canvas.addEventListener !== 'function') return;
 
-      this.canvas.addEventListener('mousemove', e => {
+      const updatePointer = (clientX, clientY) => {
         const rect = typeof this.canvas.getBoundingClientRect === 'function' ? this.canvas.getBoundingClientRect() : { left: 0, top: 0 };
-        this.pointer.x = e.clientX - rect.left;
-        this.pointer.y = e.clientY - rect.top;
+        this.pointer.x = clientX - rect.left;
+        this.pointer.y = clientY - rect.top;
         this.pointer.active = true;
 
         if (Math.random() < 0.25) {
@@ -2308,11 +2308,36 @@
             decay: 0.018 + Math.random() * 0.01
           });
         }
+      };
+
+      this.canvas.addEventListener('mousemove', e => {
+        updatePointer(e.clientX, e.clientY);
       });
 
       this.canvas.addEventListener('mouseleave', () => {
         this.pointer.active = false;
       });
+
+      // Touch events for mobile phones & tablets
+      this.canvas.addEventListener('touchstart', e => {
+        if (e.touches && e.touches.length > 0) {
+          const t = e.touches[0];
+          updatePointer(t.clientX, t.clientY);
+          const rect = typeof this.canvas.getBoundingClientRect === 'function' ? this.canvas.getBoundingClientRect() : { left: 0, top: 0 };
+          this.checkDandelionBlow(t.clientX - rect.left, t.clientY - rect.top);
+        }
+      }, { passive: true });
+
+      this.canvas.addEventListener('touchmove', e => {
+        if (e.touches && e.touches.length > 0) {
+          const t = e.touches[0];
+          updatePointer(t.clientX, t.clientY);
+        }
+      }, { passive: true });
+
+      this.canvas.addEventListener('touchend', () => {
+        this.pointer.active = false;
+      }, { passive: true });
 
       // Click to blow dandelion seeds if clicking near a dandelion head!
       this.canvas.addEventListener('click', e => {
