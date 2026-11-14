@@ -78,15 +78,15 @@
       haloOpacity: 0.28,
       flowers: {
         sunflower: { core: '#d28219', coreDeep: '#8c4b0f', petal: '#ffe628', petalWarm: '#ffb914', halo: '#ff9c00' },
-        hibiscus:  { outer: '#ff96dc', mid: '#ff41af', inner: '#d22382', stamen: '#ffeb2d', anther: '#ffaa14', halo: '#ff28a0' },
-        iris:      { standard: '#b973ff', fall: '#8c41eb', deep: '#5f23be', signal: '#ffe12d', halo: '#9641ff' },
-        thistle:   { calyx: '#5fe14b', brush: '#d773ff', brushDark: '#a541eb', halo: '#b44bfe' },
-        marigold:  { yellow: '#ffe62d', orange: '#ff7d14', crimson: '#e12819', halo: '#ff4600' },
-        daffodil:  { petal: '#ffe62d', cup: '#ff7d14', inner: '#c8500a', halo: '#ffbe00' },
-        rose:      { petal: '#ff2850', dark: '#b41432', light: '#ff6482', sepal: '#4ba032', halo: '#ff143c' },
+        hibiscus: { outer: '#ff96dc', mid: '#ff41af', inner: '#d22382', stamen: '#ffeb2d', anther: '#ffaa14', halo: '#ff28a0' },
+        iris: { standard: '#b973ff', fall: '#8c41eb', deep: '#5f23be', signal: '#ffe12d', halo: '#9641ff' },
+        thistle: { calyx: '#5fe14b', brush: '#d773ff', brushDark: '#a541eb', halo: '#b44bfe' },
+        marigold: { yellow: '#ffe62d', orange: '#ff7d14', crimson: '#e12819', halo: '#ff4600' },
+        daffodil: { petal: '#ffe62d', cup: '#ff7d14', inner: '#c8500a', halo: '#ffbe00' },
+        rose: { petal: '#ff2850', dark: '#b41432', light: '#ff6482', sepal: '#4ba032', halo: '#ff143c' },
         dandelion: { yellow: '#ffe628', seed: '#f5f5fa', core: '#a09664', halo: '#ffbe00' },
-        tulip:     { petal: '#ff375f', inner: '#c81946', stamen: '#ffd700', halo: '#ff2850' },
-        flytrap:   { jaw: '#55e64b', inside: '#e63750', teeth: '#f5f0dc', halo: '#ff3750' }
+        tulip: { petal: '#ff375f', inner: '#c81946', stamen: '#ffd700', halo: '#ff2850' },
+        flytrap: { jaw: '#55e64b', inside: '#e63750', teeth: '#f5f0dc', halo: '#ff3750' }
       }
     },
     phosphor: {
@@ -99,15 +99,15 @@
       haloOpacity: 0.35,
       flowers: {
         sunflower: { core: '#00cc55', coreDeep: '#008833', petal: '#55ff99', petalWarm: '#00ff66', halo: '#00ff66' },
-        hibiscus:  { outer: '#55ff99', mid: '#00ff66', inner: '#00cc55', stamen: '#aaffcc', anther: '#00ff66', halo: '#00ff66' },
-        iris:      { standard: '#55ff99', fall: '#00ff66', deep: '#00cc55', signal: '#ccffee', halo: '#00ff66' },
-        thistle:   { calyx: '#00aa44', brush: '#55ff99', brushDark: '#00ff66', halo: '#00ff66' },
-        marigold:  { yellow: '#55ff99', orange: '#00ff66', crimson: '#00cc55', halo: '#00ff66' },
-        daffodil:  { petal: '#55ff99', cup: '#00ff66', inner: '#00aa44', halo: '#00ff66' },
-        rose:      { petal: '#55ff99', dark: '#00aa44', light: '#aaffcc', sepal: '#008833', halo: '#00ff66' },
+        hibiscus: { outer: '#55ff99', mid: '#00ff66', inner: '#00cc55', stamen: '#aaffcc', anther: '#00ff66', halo: '#00ff66' },
+        iris: { standard: '#55ff99', fall: '#00ff66', deep: '#00cc55', signal: '#ccffee', halo: '#00ff66' },
+        thistle: { calyx: '#00aa44', brush: '#55ff99', brushDark: '#00ff66', halo: '#00ff66' },
+        marigold: { yellow: '#55ff99', orange: '#00ff66', crimson: '#00cc55', halo: '#00ff66' },
+        daffodil: { petal: '#55ff99', cup: '#00ff66', inner: '#00aa44', halo: '#00ff66' },
+        rose: { petal: '#55ff99', dark: '#00aa44', light: '#aaffcc', sepal: '#008833', halo: '#00ff66' },
         dandelion: { yellow: '#55ff99', seed: '#ccffee', core: '#00aa44', halo: '#00ff66' },
-        tulip:     { petal: '#55ff99', inner: '#00cc55', stamen: '#ccffee', halo: '#00ff66' },
-        flytrap:   { jaw: '#00ff66', inside: '#00aa44', teeth: '#ccffee', halo: '#00ff66' }
+        tulip: { petal: '#55ff99', inner: '#00cc55', stamen: '#ccffee', halo: '#00ff66' },
+        flytrap: { jaw: '#00ff66', inside: '#00aa44', teeth: '#ccffee', halo: '#00ff66' }
       }
     },
     amber: {
@@ -120,15 +120,15 @@
       haloOpacity: 0.32,
       flowers: {
         sunflower: { core: '#cc8800', coreDeep: '#885500', petal: '#ffd044', petalWarm: '#ffb000', halo: '#ff9900' },
-        hibiscus:  { outer: '#ffd044', mid: '#ffb000', inner: '#cc8800', stamen: '#fff088', anther: '#ffb000', halo: '#ff9900' },
-        iris:      { standard: '#ffd044', fall: '#ffb000', deep: '#cc8800', signal: '#fff088', halo: '#ff9900' },
-        thistle:   { calyx: '#aa7000', brush: '#ffd044', brushDark: '#ffb000', halo: '#ff9900' },
-        marigold:  { yellow: '#ffd044', orange: '#ffb000', crimson: '#cc8800', halo: '#ff9900' },
-        daffodil:  { petal: '#ffd044', cup: '#ffb000', inner: '#aa7000', halo: '#ff9900' },
-        rose:      { petal: '#ffd044', dark: '#aa7000', light: '#fff088', sepal: '#885500', halo: '#ff9900' },
+        hibiscus: { outer: '#ffd044', mid: '#ffb000', inner: '#cc8800', stamen: '#fff088', anther: '#ffb000', halo: '#ff9900' },
+        iris: { standard: '#ffd044', fall: '#ffb000', deep: '#cc8800', signal: '#fff088', halo: '#ff9900' },
+        thistle: { calyx: '#aa7000', brush: '#ffd044', brushDark: '#ffb000', halo: '#ff9900' },
+        marigold: { yellow: '#ffd044', orange: '#ffb000', crimson: '#cc8800', halo: '#ff9900' },
+        daffodil: { petal: '#ffd044', cup: '#ffb000', inner: '#aa7000', halo: '#ff9900' },
+        rose: { petal: '#ffd044', dark: '#aa7000', light: '#fff088', sepal: '#885500', halo: '#ff9900' },
         dandelion: { yellow: '#ffd044', seed: '#fff0aa', core: '#aa7000', halo: '#ff9900' },
-        tulip:     { petal: '#ffd044', inner: '#cc8800', stamen: '#fff088', halo: '#ff9900' },
-        flytrap:   { jaw: '#ffb000', inside: '#cc8800', teeth: '#fff0aa', halo: '#ff9900' }
+        tulip: { petal: '#ffd044', inner: '#cc8800', stamen: '#fff088', halo: '#ff9900' },
+        flytrap: { jaw: '#ffb000', inside: '#cc8800', teeth: '#fff0aa', halo: '#ff9900' }
       }
     },
     cyberpunk: {
@@ -141,15 +141,15 @@
       haloOpacity: 0.38,
       flowers: {
         sunflower: { core: '#7b2cbf', coreDeep: '#3c096c', petal: '#fee440', petalWarm: '#00f5d4', halo: '#00f5d4' },
-        hibiscus:  { outer: '#f72585', mid: '#b5179e', inner: '#7209b7', stamen: '#fee440', anther: '#00f5d4', halo: '#f72585' },
-        iris:      { standard: '#f72585', fall: '#7209b7', deep: '#3f37c9', signal: '#00f5d4', halo: '#f72585' },
-        thistle:   { calyx: '#00f5d4', brush: '#f72585', brushDark: '#7209b7', halo: '#f72585' },
-        marigold:  { yellow: '#fee440', orange: '#f72585', crimson: '#7209b7', halo: '#f72585' },
-        daffodil:  { petal: '#00f5d4', cup: '#f72585', inner: '#7209b7', halo: '#00f5d4' },
-        rose:      { petal: '#f72585', dark: '#7209b7', light: '#ff70a6', sepal: '#00f5d4', halo: '#f72585' },
+        hibiscus: { outer: '#f72585', mid: '#b5179e', inner: '#7209b7', stamen: '#fee440', anther: '#00f5d4', halo: '#f72585' },
+        iris: { standard: '#f72585', fall: '#7209b7', deep: '#3f37c9', signal: '#00f5d4', halo: '#f72585' },
+        thistle: { calyx: '#00f5d4', brush: '#f72585', brushDark: '#7209b7', halo: '#f72585' },
+        marigold: { yellow: '#fee440', orange: '#f72585', crimson: '#7209b7', halo: '#f72585' },
+        daffodil: { petal: '#00f5d4', cup: '#f72585', inner: '#7209b7', halo: '#00f5d4' },
+        rose: { petal: '#f72585', dark: '#7209b7', light: '#ff70a6', sepal: '#00f5d4', halo: '#f72585' },
         dandelion: { yellow: '#fee440', seed: '#00f5d4', core: '#7209b7', halo: '#fee440' },
-        tulip:     { petal: '#f72585', inner: '#7209b7', stamen: '#00f5d4', halo: '#f72585' },
-        flytrap:   { jaw: '#00f5d4', inside: '#f72585', teeth: '#fee440', halo: '#f72585' }
+        tulip: { petal: '#f72585', inner: '#7209b7', stamen: '#00f5d4', halo: '#f72585' },
+        flytrap: { jaw: '#00f5d4', inside: '#f72585', teeth: '#fee440', halo: '#f72585' }
       }
     },
     monochrome: {
@@ -162,15 +162,15 @@
       haloOpacity: 0.18,
       flowers: {
         sunflower: { core: '#888888', coreDeep: '#555555', petal: '#ffffff', petalWarm: '#cccccc', halo: '#ffffff' },
-        hibiscus:  { outer: '#ffffff', mid: '#cccccc', inner: '#888888', stamen: '#ffffff', anther: '#aaaaaa', halo: '#ffffff' },
-        iris:      { standard: '#ffffff', fall: '#cccccc', deep: '#888888', signal: '#ffffff', halo: '#ffffff' },
-        thistle:   { calyx: '#888888', brush: '#ffffff', brushDark: '#aaaaaa', halo: '#ffffff' },
-        marigold:  { yellow: '#ffffff', orange: '#cccccc', crimson: '#888888', halo: '#ffffff' },
-        daffodil:  { petal: '#ffffff', cup: '#cccccc', inner: '#888888', halo: '#ffffff' },
-        rose:      { petal: '#ffffff', dark: '#888888', light: '#dddddd', sepal: '#666666', halo: '#ffffff' },
+        hibiscus: { outer: '#ffffff', mid: '#cccccc', inner: '#888888', stamen: '#ffffff', anther: '#aaaaaa', halo: '#ffffff' },
+        iris: { standard: '#ffffff', fall: '#cccccc', deep: '#888888', signal: '#ffffff', halo: '#ffffff' },
+        thistle: { calyx: '#888888', brush: '#ffffff', brushDark: '#aaaaaa', halo: '#ffffff' },
+        marigold: { yellow: '#ffffff', orange: '#cccccc', crimson: '#888888', halo: '#ffffff' },
+        daffodil: { petal: '#ffffff', cup: '#cccccc', inner: '#888888', halo: '#ffffff' },
+        rose: { petal: '#ffffff', dark: '#888888', light: '#dddddd', sepal: '#666666', halo: '#ffffff' },
         dandelion: { yellow: '#ffffff', seed: '#ffffff', core: '#888888', halo: '#ffffff' },
-        tulip:     { petal: '#ffffff', inner: '#aaaaaa', stamen: '#ffffff', halo: '#ffffff' },
-        flytrap:   { jaw: '#cccccc', inside: '#888888', teeth: '#ffffff', halo: '#ffffff' }
+        tulip: { petal: '#ffffff', inner: '#aaaaaa', stamen: '#ffffff', halo: '#ffffff' },
+        flytrap: { jaw: '#cccccc', inside: '#888888', teeth: '#ffffff', halo: '#ffffff' }
       }
     }
   };
@@ -209,6 +209,421 @@
         this.geneticLeafSizes.push([rng.range(0.75, 1.35), rng.range(0.75, 1.35)]);
         this.geneticPhyllotaxis.push(rng.choice(['paired', 'paired', 'alternate_l', 'alternate_r']));
       }
+
+      this.initMembers();
+    }
+
+    /**
+     * Initialize Persistent Member Graph:
+     * Individual lifecycles and subcycles for leaves, apical flower, and axillary branches.
+     */
+    initMembers() {
+      const rng = new PRNG(this.seed);
+      this.members = {
+        leaves: [],
+        branches: [],
+        apicalFlower: {
+          state: 'dormant', // dormant, bud, opening, blooming, wilting, dead
+          bloom: 0.0,
+          age: 0.0,
+          lifespan: rng.range(90, 160),
+          resproutTimer: 0.0,
+          cycleCount: 0
+        }
+      };
+
+      // 1. Main Stem Leaf Members
+      const numClusters = Math.min(6, Math.floor(this.geneticLeafClusters * this.leafDensity));
+      for (let c = 1; c <= numClusters; c++) {
+        const baseRatio = c / (numClusters + 1);
+        const jitter = this.geneticLeafJitters[c % this.geneticLeafJitters.length];
+        const clampedRatio = clamp(baseRatio + jitter, 0.12, 0.88);
+        const phyllo = this.geneticPhyllotaxis[c % this.geneticPhyllotaxis.length];
+        const sizePair = this.geneticLeafSizes[c % this.geneticLeafSizes.length];
+        const allometry = 0.72 + 0.55 * Math.sin(clampedRatio * Math.PI);
+        const baseLifespan = rng.range(65, 120);
+
+        if (phyllo === 'paired') {
+          const yOffsetR = 2 + Math.floor(((this.seed * 3 + c * 5) % 5));
+          this.members.leaves.push({
+            id: `leaf_${c}_l`,
+            cluster: c,
+            yRatio: clampedRatio,
+            yOffset: 0,
+            side: -1,
+            baseScale: sizePair[0] * allometry,
+            scale: sizePair[0] * allometry * 0.08,
+            maturity: 0.08,
+            state: 'dormant',
+            age: 0.0,
+            lifespan: baseLifespan * rng.range(0.85, 1.15),
+            wiltTimer: 18.0,
+            resproutTimer: rng.range(25, 45),
+            isWilted: false,
+            isDead: false
+          });
+          this.members.leaves.push({
+            id: `leaf_${c}_r`,
+            cluster: c,
+            yRatio: clampedRatio,
+            yOffset: yOffsetR,
+            side: 1,
+            baseScale: sizePair[1] * allometry,
+            scale: sizePair[1] * allometry * 0.08,
+            maturity: 0.08,
+            state: 'dormant',
+            age: 0.0,
+            lifespan: baseLifespan * rng.range(0.85, 1.15),
+            wiltTimer: 18.0,
+            resproutTimer: rng.range(25, 45),
+            isWilted: false,
+            isDead: false
+          });
+        } else if (phyllo === 'alternate_l') {
+          this.members.leaves.push({
+            id: `leaf_${c}_l`,
+            cluster: c,
+            yRatio: clampedRatio,
+            yOffset: 0,
+            side: -1,
+            baseScale: sizePair[0] * allometry,
+            scale: sizePair[0] * allometry * 0.08,
+            maturity: 0.08,
+            state: 'dormant',
+            age: 0.0,
+            lifespan: baseLifespan,
+            wiltTimer: 18.0,
+            resproutTimer: rng.range(25, 45),
+            isWilted: false,
+            isDead: false
+          });
+        } else {
+          this.members.leaves.push({
+            id: `leaf_${c}_r`,
+            cluster: c,
+            yRatio: clampedRatio,
+            yOffset: 0,
+            side: 1,
+            baseScale: sizePair[1] * allometry,
+            scale: sizePair[1] * allometry * 0.08,
+            maturity: 0.08,
+            state: 'dormant',
+            age: 0.0,
+            lifespan: baseLifespan,
+            wiltTimer: 18.0,
+            resproutTimer: rng.range(25, 45),
+            isWilted: false,
+            isDead: false
+          });
+        }
+      }
+
+      // 2. Secondary Branches (with child leaves and child flowers)
+      const branchMax = Math.min(this.geneticMaxBranches, Math.floor(this.branchingProp * 3));
+      const initialSide = ((this.seed % 2) === 0) ? -1 : 1;
+
+      for (let bi = 0; bi < branchMax; bi++) {
+        const branchSide = (bi % 2 === 0) ? initialSide : -initialSide;
+        const startYRatio = 0.30 + bi * 0.22;
+        const bLenRatio = this.geneticBranchLengths[bi % this.geneticBranchLengths.length] || 0.4;
+        const bAngle = this.geneticBranchAngles[bi % this.geneticBranchAngles.length] || 0.65;
+
+        // Child leaves on this branch
+        const branchLeaves = [
+          {
+            id: `br_leaf_${bi}_0`,
+            posAlong: 0.45,
+            side: -branchSide,
+            scale: 0.75,
+            state: 'dormant',
+            age: 0.0,
+            lifespan: rng.range(50, 90),
+            wiltTimer: 16.0,
+            resproutTimer: rng.range(20, 35)
+          },
+          {
+            id: `br_leaf_${bi}_1`,
+            posAlong: 0.80,
+            side: branchSide,
+            scale: 0.65,
+            state: 'dormant',
+            age: 0.0,
+            lifespan: rng.range(50, 90),
+            wiltTimer: 16.0,
+            resproutTimer: rng.range(20, 35)
+          }
+        ];
+
+        // Child flower at branch tip
+        const branchFlower = {
+          id: `br_flower_${bi}`,
+          state: 'dormant',
+          bloom: 0.0,
+          age: 0.0,
+          lifespan: rng.range(70, 130),
+          resproutTimer: rng.range(25, 45),
+          isDead: false
+        };
+
+        this.members.branches.push({
+          id: `branch_${bi}`,
+          index: bi,
+          side: branchSide,
+          startYRatio,
+          lengthRatio: bLenRatio,
+          currentLength: 0.0,
+          angle: bAngle,
+          health: 1.0,
+          state: 'dormant',
+          isDead: false,
+          deathTimer: 0.0,
+          leaves: branchLeaves,
+          flower: branchFlower
+        });
+      }
+    }
+
+    /**
+     * Advance Member Subcycles over time (leaves, flowers, and branches with dependency rules)
+     */
+    updateMembers(dt, timeSpeed = 1.0, globalAge = 0.0) {
+      if (!this.members) this.initMembers();
+      const effectiveDt = dt * timeSpeed;
+      const effectiveMaxHeight = this.maxHeight * this.geneticHeightMod;
+      const growthFactor = (1 - Math.exp(-4 * Math.min(1.0, globalAge))) / (1 - Math.exp(-4));
+      const shootHeight = Math.max(20, effectiveMaxHeight * growthFactor);
+      const senescence = clamp((globalAge - 1.05) / 0.35, 0.0, 1.0);
+
+      // 1. UPDATE MAIN STEM LEAVES
+      this.members.leaves.forEach(l => {
+        const nodeTargetY = l.yRatio * (effectiveMaxHeight * 0.88);
+        const apexDist = shootHeight - nodeTargetY;
+
+        if (apexDist >= 0) {
+          if (l.state === 'dormant') {
+            l.state = 'bud';
+            l.maturity = 0.08;
+            l.age = 0.0;
+            l.isDead = false;
+            l.isWilted = false;
+          }
+
+          if (l.state === 'bud' || l.state === 'growing') {
+            l.maturity = clamp((apexDist - 2) / 48, 0.08, 1.0);
+            if (l.maturity >= 1.0) {
+              l.state = 'mature';
+            }
+          }
+
+          if (l.state === 'mature') {
+            l.age += effectiveDt;
+            if (l.age >= l.lifespan || (senescence > 0.12 && nodeTargetY < effectiveMaxHeight * (0.25 + senescence * 0.8))) {
+              l.state = 'wilting';
+              l.isWilted = true;
+            }
+          }
+
+          if (l.state === 'wilting') {
+            l.wiltTimer -= effectiveDt;
+            if (l.wiltTimer <= 0) {
+              l.state = 'dead';
+              l.isDead = true;
+              l.isWilted = false;
+            }
+          }
+
+          if (l.state === 'dead' && senescence < 0.90) {
+            l.resproutTimer -= effectiveDt;
+            if (l.resproutTimer <= 0) {
+              l.state = 'bud';
+              l.maturity = 0.08;
+              l.age = 0.0;
+              l.isDead = false;
+              l.isWilted = false;
+              l.wiltTimer = 18.0;
+              l.resproutTimer = 30.0;
+            }
+          }
+        }
+      });
+
+      // 2. UPDATE APICAL FLOWER
+      const af = this.members.apicalFlower;
+      if (globalAge > 0.42 && senescence < 0.92) {
+        if (af.state === 'dormant') {
+          af.state = 'bud';
+          af.bloom = 0.10;
+          af.age = 0.0;
+        }
+
+        if (af.state === 'bud') {
+          af.bloom = Math.min(0.40, af.bloom + effectiveDt * 0.05);
+          if (af.bloom >= 0.38) af.state = 'opening';
+        } else if (af.state === 'opening') {
+          af.bloom = Math.min(1.0, af.bloom + effectiveDt * 0.06);
+          if (af.bloom >= 0.90) af.state = 'blooming';
+        } else if (af.state === 'blooming') {
+          af.age += effectiveDt;
+          if (af.age >= af.lifespan || senescence > 0.15) {
+            af.state = 'wilting';
+          }
+        } else if (af.state === 'wilting') {
+          af.bloom = Math.max(0.0, af.bloom - effectiveDt * 0.04);
+          if (af.bloom <= 0.05) {
+            af.state = 'dead';
+            af.resproutTimer = 35.0;
+          }
+        } else if (af.state === 'dead' && senescence < 0.85) {
+          af.resproutTimer -= effectiveDt;
+          if (af.resproutTimer <= 0) {
+            af.state = 'bud';
+            af.bloom = 0.10;
+            af.age = 0.0;
+            af.cycleCount++;
+          }
+        }
+      }
+
+      // 3. UPDATE SECONDARY BRANCHES & MEMBER DEPENDENCY
+      this.members.branches.forEach(b => {
+        if (b.isDead) return;
+
+        const branchStartY = b.startYRatio * (effectiveMaxHeight * 0.88);
+        if (shootHeight >= branchStartY && globalAge > 0.45 && senescence < 0.90) {
+          if (b.state === 'dormant') {
+            b.state = 'growing';
+            b.currentLength = 4.0;
+            b.health = 1.0;
+          }
+
+          const targetLen = shootHeight * b.lengthRatio * (1.0 - senescence * 0.35);
+          if (b.currentLength < targetLen) {
+            b.currentLength = Math.min(targetLen, b.currentLength + effectiveDt * 12.0);
+          }
+
+          // Update child leaves on this branch
+          b.leaves.forEach(bl => {
+            if (bl.state === 'dormant' && b.currentLength >= targetLen * bl.posAlong) {
+              bl.state = 'mature';
+              bl.age = 0.0;
+            }
+            if (bl.state === 'mature') {
+              bl.age += effectiveDt;
+              if (bl.age >= bl.lifespan || senescence > 0.15) {
+                bl.state = 'wilting';
+              }
+            } else if (bl.state === 'wilting') {
+              bl.wiltTimer -= effectiveDt;
+              if (bl.wiltTimer <= 0) {
+                bl.state = 'dead';
+              }
+            } else if (bl.state === 'dead' && b.health > 0.5 && senescence < 0.85) {
+              bl.resproutTimer -= effectiveDt;
+              if (bl.resproutTimer <= 0) {
+                bl.state = 'mature';
+                bl.age = 0.0;
+                bl.wiltTimer = 16.0;
+                bl.resproutTimer = 25.0;
+              }
+            }
+          });
+
+          // Update child flower on this branch
+          const bf = b.flower;
+          if (bf.state === 'dormant' && b.currentLength >= targetLen * 0.85) {
+            bf.state = 'bud';
+            bf.bloom = 0.15;
+            bf.age = 0.0;
+          }
+          if (bf.state === 'bud' || bf.state === 'opening') {
+            bf.bloom = Math.min(1.0, bf.bloom + effectiveDt * 0.05);
+            if (bf.bloom >= 0.85) bf.state = 'blooming';
+          } else if (bf.state === 'blooming') {
+            bf.age += effectiveDt;
+            if (bf.age >= bf.lifespan || senescence > 0.15) {
+              bf.state = 'wilting';
+            }
+          } else if (bf.state === 'wilting') {
+            bf.bloom = Math.max(0.0, bf.bloom - effectiveDt * 0.04);
+            if (bf.bloom <= 0.05) {
+              bf.state = 'dead';
+              bf.isDead = true;
+              bf.resproutTimer = 35.0;
+            }
+          } else if (bf.state === 'dead' && b.health > 0.6 && senescence < 0.85) {
+            bf.resproutTimer -= effectiveDt;
+            if (bf.resproutTimer <= 0) {
+              bf.state = 'bud';
+              bf.bloom = 0.15;
+              bf.age = 0.0;
+              bf.isDead = false;
+            }
+          }
+
+          // =========================================================
+          // THE BRANCH DEPENDENCY RULE:
+          // "if all flowers on that branch are dead and all leaves are dead
+          // then there is a chance for it to die"
+          // =========================================================
+          const allLeavesDead = b.leaves.every(l => l.state === 'dead' || l.state === 'wilting');
+          const allFlowersDead = !bf || bf.state === 'dead' || bf.state === 'dormant';
+
+          if (allLeavesDead && allFlowersDead && b.state !== 'dormant') {
+            // Vascular sap flow stops; branch withers
+            b.health = Math.max(0.0, b.health - effectiveDt * 0.04);
+            b.state = 'withering';
+
+            // Progressive organic probability to die and break off once health is depleted
+            if (b.health <= 0.0) {
+              b.deathTimer += effectiveDt;
+              if (Math.random() < (0.06 * effectiveDt) || b.deathTimer > 30.0) {
+                b.isDead = true;
+                b.state = 'dead';
+              }
+            }
+          } else if (b.state !== 'dormant' && !b.isDead) {
+            // Alive leaves or flowers nourish the branch!
+            b.health = Math.min(1.0, b.health + effectiveDt * 0.12);
+            b.state = b.health > 0.6 ? 'thriving' : 'growing';
+            b.deathTimer = 0.0;
+          }
+        }
+      });
+    }
+
+    feedMembers(amount = 0.35) {
+      if (!this.members) return;
+      this.members.leaves.forEach(l => {
+        if (l.state === 'wilting' || l.state === 'dead') {
+          l.state = 'bud';
+          l.maturity = 0.30;
+          l.age = 0.0;
+          l.isWilted = false;
+          l.isDead = false;
+          l.wiltTimer = 18.0;
+        }
+      });
+      const af = this.members.apicalFlower;
+      if (af.state === 'wilting' || af.state === 'dead') {
+        af.state = 'blooming';
+        af.bloom = 0.85;
+        af.age = 0.0;
+      }
+      this.members.branches.forEach(b => {
+        b.health = 1.0;
+        if (b.state === 'withering') b.state = 'thriving';
+        b.leaves.forEach(bl => {
+          if (bl.state === 'wilting' || bl.state === 'dead') {
+            bl.state = 'mature';
+            bl.age = 0.0;
+          }
+        });
+        if (b.flower && (b.flower.state === 'wilting' || b.flower.state === 'dead')) {
+          b.flower.state = 'blooming';
+          b.flower.bloom = 0.80;
+          b.flower.isDead = false;
+        }
+      });
     }
 
     simulate(age = 1.0, bloomOverride = null, time = 0, windStrength = 0.5, pointerDist = null) {
@@ -269,127 +684,93 @@
         stemNodes.push({ x, y, t });
       }
 
-      // 2. Leaves & Internodes with Organic Gradual Growth (No Popping In!)
+      // 2. Leaves with Member Subcycles and Smooth Allometric Emergence
+      if (!this.members) this.initMembers();
+
       const leaves = [];
-      if (growthAge > 0.15) {
-        const numClusters = Math.min(6, Math.floor(this.geneticLeafClusters * this.leafDensity));
-        let prevY = -999;
-        for (let c = 1; c <= numClusters; c++) {
-          const baseRatio = c / (numClusters + 1);
-          const jitter = this.geneticLeafJitters[c % this.geneticLeafJitters.length];
-          const clampedRatio = clamp(baseRatio + jitter, 0.12, 0.88);
-          // Fixed physiological node position along maximum mature stem height
-          const nodeTargetY = clampedRatio * (effectiveMaxHeight * 0.88);
+      const activeLeaves = [];
 
-          // Node only emerges when the growing stem apex reaches it!
-          if (shootHeight >= nodeTargetY && nodeTargetY >= prevY + 25) {
-            prevY = nodeTargetY;
-            const phyllo = this.geneticPhyllotaxis[c % this.geneticPhyllotaxis.length];
-            const sizePair = this.geneticLeafSizes[c % this.geneticLeafSizes.length];
+      this.members.leaves.forEach(l => {
+        const nodeTargetY = l.yRatio * (effectiveMaxHeight * 0.88) + (l.yOffset || 0);
+        if (shootHeight >= nodeTargetY) {
+          // If updateMembers hasn't stepped (static call), compute continuous maturity and wilting
+          let maturity = l.maturity;
+          let isW = l.isWilted || l.state === 'wilting';
 
-            // Distance the apex has ascended beyond this node determines maturity
+          if (l.state === 'dormant') {
             const apexDistance = shootHeight - nodeTargetY;
-            // Leaf starts as tiny nascent bud (maturity ~0.08) and unfurls to 1.0 over ~50px of growth!
-            const maturity = clamp((apexDistance - 2) / 48, 0.08, 1.0);
+            maturity = clamp((apexDistance - 2) / 48, 0.08, 1.0);
+            if (nodeTargetY < effectiveMaxHeight * 0.25 && growthAge > 0.65) {
+              isW = true;
+            }
+            if (senescence > 0.12 && nodeTargetY < effectiveMaxHeight * (0.25 + senescence * 0.8)) {
+              isW = true;
+            }
+          }
 
-            // Biological allometry: mid-stem leaves are largest, juvenile top leaves are smaller
-            const allometry = 0.72 + 0.55 * Math.sin(clampedRatio * Math.PI);
-
-            if (phyllo === 'paired') {
-              const yOffsetR = 2 + Math.floor(((this.seed * 3 + c * 5) % 5));
-              leaves.push({
-                y: nodeTargetY,
-                side: -1,
-                scale: sizePair[0] * allometry * maturity,
-                maturity,
-                isWilted: false
-              });
-              leaves.push({
-                y: nodeTargetY + yOffsetR,
-                side: 1,
-                scale: sizePair[1] * allometry * maturity,
-                maturity,
-                isWilted: false
-              });
-            } else if (phyllo === 'alternate_l') {
-              leaves.push({
-                y: nodeTargetY,
-                side: -1,
-                scale: sizePair[0] * allometry * maturity,
-                maturity,
-                isWilted: false
-              });
-            } else {
-              leaves.push({
-                y: nodeTargetY,
-                side: 1,
-                scale: sizePair[1] * allometry * maturity,
-                maturity,
-                isWilted: false
-              });
+          if (l.state !== 'dead') {
+            const allometry = 0.72 + 0.55 * Math.sin(l.yRatio * Math.PI);
+            const scale = (l.baseScale !== undefined ? l.baseScale : ((l.scaleMod || 1.0) * allometry)) * maturity;
+            const leafObj = {
+              id: l.id,
+              y: nodeTargetY,
+              side: l.side,
+              scale,
+              maturity,
+              isWilted: isW,
+              state: l.state
+            };
+            leaves.push(leafObj);
+            if (!isW && maturity > 0.35) {
+              activeLeaves.push(leafObj);
             }
           }
         }
-      }
+      });
 
-      // 3. Basal Senescence & Whole-Plant Senescence
-      for (let l of leaves) {
-        // Natural basal leaf shading & death in mature plants
-        if (l.y < effectiveMaxHeight * 0.25 && growthAge > 0.65) {
-          l.isWilted = true;
-        }
-        // Progressive wilting during post-bloom senescence
-        if (senescence > 0.12) {
-          if (l.y < effectiveMaxHeight * (0.25 + senescence * 0.8)) {
-            l.isWilted = true;
+      // 3. Auxin & Axillary Branches with Child Leaves, Tip Flowers, and Living Subcycles
+      const branches = [];
+      this.members.branches.forEach(b => {
+        if (b.isDead) return; // Dead branches drop off organically!
+
+        const startY = b.startYRatio * (effectiveMaxHeight * 0.88);
+        if (shootHeight >= startY && growthAge > 0.45) {
+          let bLen = b.currentLength;
+          if (b.state === 'dormant' || bLen < 1) {
+            const bProgress = Math.min(1.0, (growthAge - 0.48) / 0.45);
+            bLen = shootHeight * b.lengthRatio * bProgress * (1.0 - senescence * 0.35);
+          }
+
+          if (bLen > 2) {
+            const bAngle = b.angle + (senescence * 0.28);
+            const hasFlower = b.flower && (b.flower.state === 'bud' || b.flower.state === 'opening' || b.flower.state === 'blooming' || b.flower.state === 'wilting');
+            branches.push({
+              id: b.id,
+              startY: startY,
+              side: b.side,
+              length: bLen,
+              angle: bAngle,
+              state: b.state,
+              health: b.health,
+              leaves: b.leaves || [],
+              flower: b.flower,
+              hasFlower
+            });
           }
         }
-      }
+      });
 
-      // 4. Auxin & Axillary Branching (Shoots emerge from BOTH Left and Right sides!)
-      const activeLeaves = leaves.filter(l => !l.isWilted && l.maturity > 0.35);
-      const branches = [];
-      const branchMax = Math.min(this.geneticMaxBranches, Math.floor(this.branchingProp * 3));
-      
-      if (activeLeaves.length >= 2 && growthAge > 0.48 && branchMax > 0 && senescence < 0.90) {
-        const actualBranches = Math.min(branchMax, activeLeaves.length);
-        // Alternate initial side based on genetic seed
-        const initialSide = ((this.seed % 2) === 0) ? -1 : 1;
-
-        for (let bi = 0; bi < actualBranches; bi++) {
-          // Desired side alternates: Left (-1), Right (1), Left (-1), Right (1)...
-          const desiredSide = (bi % 2 === 0) ? initialSide : -initialSide;
-
-          // Find an active leaf on the desired side
-          const candidateLeaf = activeLeaves.find(l => l.side === desiredSide && l.y >= shootHeight * 0.22)
-            || activeLeaves[Math.min(activeLeaves.length - 1, bi)];
-
-          const branchSide = candidateLeaf ? candidateLeaf.side : desiredSide;
-          const startY = candidateLeaf ? candidateLeaf.y : (0.32 + bi * 0.22) * shootHeight;
-
-          const bProgress = Math.min(1.0, (growthAge - 0.48) / 0.45);
-          const bLen = shootHeight * (this.geneticBranchLengths[bi % this.geneticBranchLengths.length] || 0.4) * bProgress * (1.0 - senescence * 0.35);
-          const bAngle = (this.geneticBranchAngles[bi % this.geneticBranchAngles.length] || 0.65) + (senescence * 0.28);
-
-          branches.push({
-            startY: startY,
-            side: branchSide,
-            length: bLen,
-            angle: bAngle,
-            hasFlower: (bProgress > 0.75 && senescence < 0.60)
-          });
-        }
-      }
-
-      // 5. Flower Scaling Modulated by Active Leaves Biomass
+      // 4. Flower Scaling Modulated by Active Leaves Biomass
       const totalLeafEnergy = activeLeaves.reduce((acc, l) => acc + (l.scale !== undefined ? l.scale : 1.0), 0);
       let flowerScale = (0.65 + totalLeafEnergy * 0.08) * this.geneticFlowerScaleMod;
       flowerScale = clamp(flowerScale, 0.5, 1.45);
 
-      // Continuous Smooth Bud-to-Bloom & Senescence Calculation
+      // Continuous Smooth Bud-to-Bloom & Member Subcycles
       let bloom = 0.0;
       if (bloomOverride !== null) {
         bloom = clamp(bloomOverride, 0.0, 1.0);
+      } else if (this.members && this.members.apicalFlower && this.members.apicalFlower.state !== 'dormant') {
+        bloom = this.members.apicalFlower.bloom;
       } else if (growthAge > 0.42) {
         // Natural gradual opening starting at age 0.42, fully open at 0.88
         bloom = smoothstep(0.42, 0.88, growthAge);
@@ -400,6 +781,10 @@
         bloom = Math.max(0.0, bloom * (1.0 - senescence * 0.65));
       }
 
+      const isBud = (this.members && this.members.apicalFlower && this.members.apicalFlower.state !== 'dormant')
+        ? (this.members.apicalFlower.state !== 'dead')
+        : (growthAge > 0.38 && senescence < 0.88);
+
       return {
         type: this.type,
         age,
@@ -408,7 +793,7 @@
         isWilting: (senescence > 0.15),
         isDecaying: (senescence >= 0.88),
         bloom,
-        isBud: (growthAge > 0.38 && senescence < 0.88),
+        isBud,
         shootHeight,
         stemNodes,
         leaves,
@@ -475,7 +860,7 @@
           const n = nodes[i];
           const px = originX + n.x;
           const py = groundY - n.y;
-          const ch = (i > 8 && nodes[i].x > nodes[i-4].x) ? "/" : ((i > 8 && nodes[i].x < nodes[i-4].x) ? "\\" : "|");
+          const ch = (i > 8 && nodes[i].x > nodes[i - 4].x) ? "/" : ((i > 8 && nodes[i].x < nodes[i - 4].x) ? "\\" : "|");
           glyphs.push({ x: px, y: py, char: ch, fg: cStem, size: 14 });
           if (i % 12 === 0 && i > 5 && i < nodes.length - 8) {
             glyphs.push({ x: px - 4, y: py - 4, char: "(", fg: cStemDark, size: 13 });
@@ -697,23 +1082,46 @@
       }
 
       // -------------------------------------------------------------
-      // 3. SECONDARY BRANCHES
+      // 3. SECONDARY BRANCHES (WITH MEMBER SUBCYCLES & CHILD LEAVES)
       // -------------------------------------------------------------
       branches.forEach(b => {
         const t = b.startY / Math.max(1, shootH);
         const nIdx = Math.min(nodes.length - 1, Math.floor(t * (nodes.length - 1)));
         const bx0 = originX + nodes[nIdx].x;
         const by0 = groundY - b.startY;
+
+        const isWithering = (b.state === 'withering' || (b.health !== undefined && b.health < 0.35));
+        const brStemCol = isWithering ? cDead : cStem;
+
         for (let bi = 0; bi <= b.length; bi += 8) {
           const curvX = bx0 + b.side * (bi * Math.sin(b.angle) + Math.sin(bi * 0.12) * 5);
           const curvY = by0 - (bi * Math.cos(b.angle));
-          glyphs.push({ x: curvX, y: curvY, char: b.side > 0 ? "/" : "\\", fg: cStem, size: 13 });
+          const brChar = isWithering ? ":" : (b.side > 0 ? "/" : "\\");
+          glyphs.push({ x: curvX, y: curvY, char: brChar, fg: brStemCol, size: 13 });
         }
-        if (b.hasFlower && bloom > 0.25) {
+
+        // Child leaves on this branch
+        if (b.leaves && b.leaves.length > 0) {
+          b.leaves.forEach(bl => {
+            if (bl.state === 'dormant' || bl.state === 'dead') return;
+            const bi = b.length * (bl.posAlong || 0.5);
+            const lx = bx0 + b.side * (bi * Math.sin(b.angle) + Math.sin(bi * 0.12) * 5);
+            const ly = by0 - (bi * Math.cos(b.angle));
+            const isLeafWilted = (bl.state === 'wilting' || isWithering);
+            const leafCol = isLeafWilted ? cDead : cStem;
+            const lChar = isLeafWilted ? "~" : (bl.side < 0 ? "<" : ">");
+            glyphs.push({ x: lx + bl.side * 5, y: ly, char: lChar, fg: leafCol, size: 11 });
+          });
+        }
+
+        // Child flower at branch tip
+        const bFlower = b.flower;
+        const bBloom = (bFlower && bFlower.state !== 'dormant' && !bFlower.isDead) ? bFlower.bloom : (b.hasFlower ? bloom * 0.8 : 0);
+        if (bBloom > 0.15) {
           const fEndX = bx0 + b.side * (b.length * Math.sin(b.angle));
           const fEndY = by0 - (b.length * Math.cos(b.angle));
           const secFlower = ProceduralFlowerRenderer.generateGlyphs(
-            pType, fEndX, fEndY, fScale * 0.65, bloom * 0.8, palette, time, false, pData.isWilting
+            pType, fEndX, fEndY, fScale * 0.65, bBloom, palette, time, false, (pData.isWilting || isWithering)
           );
           glyphs.push(...secFlower);
         }
@@ -960,18 +1368,18 @@
     static _buildIris(out, cx, cy, s, b, pal, time, isWilting = false) {
       const fcy = cy - 20 * s;
       const standardsLeft = [
-        { dx: -16*s*b, dy: -20*s, txt: "((" },
-        { dx: -20*s*b, dy: -36*s, txt: "%%%" },
-        { dx: -22*s*b, dy: -54*s, txt: "@@@" },
-        { dx: -18*s*b, dy: -72*s, txt: "((((" },
-        { dx: -10*s*b, dy: -84*s, txt: "\\\\" }
+        { dx: -16 * s * b, dy: -20 * s, txt: "((" },
+        { dx: -20 * s * b, dy: -36 * s, txt: "%%%" },
+        { dx: -22 * s * b, dy: -54 * s, txt: "@@@" },
+        { dx: -18 * s * b, dy: -72 * s, txt: "((((" },
+        { dx: -10 * s * b, dy: -84 * s, txt: "\\\\" }
       ];
       const standardsRight = [
-        { dx: 16*s*b, dy: -20*s, txt: "))" },
-        { dx: 20*s*b, dy: -36*s, txt: "%%%" },
-        { dx: 22*s*b, dy: -54*s, txt: "@@@" },
-        { dx: 18*s*b, dy: -72*s, txt: "))))" },
-        { dx: 10*s*b, dy: -84*s, txt: "//" }
+        { dx: 16 * s * b, dy: -20 * s, txt: "))" },
+        { dx: 20 * s * b, dy: -36 * s, txt: "%%%" },
+        { dx: 22 * s * b, dy: -54 * s, txt: "@@@" },
+        { dx: 18 * s * b, dy: -72 * s, txt: "))))" },
+        { dx: 10 * s * b, dy: -84 * s, txt: "//" }
       ];
       [...standardsLeft, ...standardsRight].forEach(pt => {
         for (let i = 0; i < pt.txt.length; i++) {
@@ -1109,7 +1517,7 @@
 
     static _buildDandelion(out, cx, cy, s, b, pal, time, seedsBlown = false) {
       const fcy = cy - 20 * s;
-      
+
       // Core receptacle
       out.push({ x: cx, y: fcy, char: '(#)', fg: pal.core, size: 15 * s });
 
@@ -1354,7 +1762,7 @@
       this.paletteName = options.palette || 'botanical';
       this.interactive = options.interactive !== false;
       this.pointerMode = options.pointerMode || 'reach';
-      
+
       this.simulator = new BotanicalSimulator({
         type: this.type,
         seed: this.seed,
@@ -1374,6 +1782,11 @@
     feed(amount = 0.20) {
       this.growthBoost = Math.min(0.65, this.growthBoost + amount);
       this.vitality = Math.min(1.4, this.vitality + 0.2);
+      this.simulator.feedMembers(amount);
+    }
+
+    update(dt, timeSpeed = 1.0) {
+      this.simulator.updateMembers(dt, timeSpeed, this.age);
     }
 
     setAge(val) {
@@ -1437,7 +1850,7 @@
      * Ultra-fast canvas render: ZERO per-glyph shadowBlur calls!
      * Runs locked at 60-120 FPS on all devices.
      */
-    renderToCanvas(ctx, originX, groundY, time = 0, windStrength = 0.5) {
+    renderToCanvas(ctx, originX, groundY, time = 0, windStrength = 0.5, options = {}) {
       const glyphs = this.generateGlyphs(originX, groundY, time, windStrength);
 
       ctx.save();
@@ -1452,6 +1865,35 @@
       });
 
       ctx.restore();
+
+      // Optional subtle bloom pass if requested
+      if (options.bloom && ctx && ctx.canvas) {
+        const c = ctx.canvas;
+        if (!this._bloomCanvas) {
+          this._bloomCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+        }
+        if (this._bloomCanvas) {
+          const bw = Math.max(1, Math.floor(c.width / 3));
+          const bh = Math.max(1, Math.floor(c.height / 3));
+          if (this._bloomCanvas.width !== bw || this._bloomCanvas.height !== bh) {
+            this._bloomCanvas.width = bw;
+            this._bloomCanvas.height = bh;
+          }
+          const bCtx = this._bloomCanvas.getContext('2d');
+          if (bCtx) {
+            bCtx.clearRect(0, 0, bw, bh);
+            if (typeof bCtx.filter !== 'undefined') bCtx.filter = 'blur(2.5px)';
+            bCtx.drawImage(c, 0, 0, bw, bh);
+            if (typeof bCtx.filter !== 'undefined') bCtx.filter = 'none';
+
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 0.35;
+            ctx.drawImage(this._bloomCanvas, 0, 0, c.width, c.height);
+            ctx.restore();
+          }
+        }
+      }
     }
 
     toPlainText(cols = 40, rows = 35) {
@@ -1680,7 +2122,7 @@
       this.plants.forEach(({ plant, x }) => {
         // Continuous biological lifecycle: sprout -> grow -> bloom -> mature -> wilt -> die -> reseed
         if (this.timeSpeed > 0) {
-          const agingSpeed = 0.022 * this.timeSpeed;
+          const agingSpeed = 0.0011 * this.timeSpeed; // 20x longer whole-plant lifecycle (~21.2 min at 1x)
           let newAge = plant.age + effectiveDt * agingSpeed;
 
           // Senescence completion: when plant reaches age >= 1.40, it dies into mulch and reseeds!
@@ -1690,12 +2132,14 @@
             plant.seed = Math.floor(Math.random() * 100000);
             plant.simulator.seed = plant.seed;
             plant.simulator.rng = new PRNG(plant.seed);
+            plant.simulator.initMembers();
             plant.seedsBlown = false;
             if (typeof this.onPlantReseed === 'function') {
               this.onPlantReseed(plant, x);
             }
           }
           plant.setAge(newAge);
+          plant.update(dt, this.timeSpeed);
         }
 
         // Sunlight nourishment boost update
@@ -1891,16 +2335,31 @@
       });
       ctx.restore();
 
-      // Fast Screen-Space Bloom Pass (hardware accelerated, zero per-glyph shadowBlur lag)
+      // Fast Screen-Space Bloom Pass (hardware accelerated, covers ALL drawn artefacts with zero per-glyph lag)
       if (this.bloomCanvas && this.bloomW > 0 && this.bloomH > 0) {
         this.bloomCtx.clearRect(0, 0, this.bloomW, this.bloomH);
+
+        // Hardware-accelerated canvas filter blur on downscaled 1/3 buffer
+        if (typeof this.bloomCtx.filter !== 'undefined') {
+          this.bloomCtx.filter = 'blur(2.5px)';
+        }
         this.bloomCtx.drawImage(this.canvas, 0, 0, this.bloomW, this.bloomH);
+        if (typeof this.bloomCtx.filter !== 'undefined') {
+          this.bloomCtx.filter = 'none';
+        }
 
         ctx.save();
-        ctx.globalAlpha = 0.40;
         ctx.globalCompositeOperation = 'lighter';
-        // Bilinear stretch provides smooth, velvety bloom across all characters!
+
+        // Dual-tier composite for ethereal, soft radiant glow:
+        // Tier 1: Crisp luminous inner core
+        ctx.globalAlpha = 0.38;
         ctx.drawImage(this.bloomCanvas, 0, 0, w, h);
+
+        // Tier 2: Soft atmospheric diffusion halo
+        ctx.globalAlpha = 0.16;
+        ctx.drawImage(this.bloomCanvas, -2, -2, w + 4, h + 4);
+
         ctx.restore();
       }
     }
@@ -1947,7 +2406,7 @@
       customElements.define('florametric-plant', FlorametricPlantElement);
     }
     if (!customElements.get('ascii-plant')) {
-      class AsciiPlantElement extends FlorametricPlantElement {}
+      class AsciiPlantElement extends FlorametricPlantElement { }
       customElements.define('ascii-plant', AsciiPlantElement);
     }
   }
@@ -1956,6 +2415,9 @@
     AsciiPlant,
     AsciiGarden,
     GrassTuft,
+    BotanicalSimulator,
+    BotanicalArchitect,
+    ProceduralFlowerRenderer,
     PALETTES,
     SPECIES: ['sunflower', 'hibiscus', 'iris', 'thistle', 'marigold', 'daffodil', 'rose', 'dandelion', 'tulip', 'flytrap'],
     generateString: (options) => {

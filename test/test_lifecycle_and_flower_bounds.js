@@ -190,9 +190,9 @@ garden.onPlantReseed = (p, x) => {
   console.log(`  ✓ onPlantReseed callback fired at x=${x.toFixed(1)}!`);
 };
 
-// Force age to 1.399 and run update
-testPlant.age = 1.399;
-garden.update(0.1); // effectiveDt will push age >= 1.40
+// Force age to 1.3999 and run update
+testPlant.age = 1.3995;
+garden.update(1.0); // effectiveDt * 0.0011 will push age >= 1.40
 console.log(`  Phase 5: After cycle completion, plant age reset to ${testPlant.age.toFixed(2)}`);
 console.assert(testPlant.age < 0.20, "Plant must reset to young sprout after completing life cycle");
 console.assert(reseedFired === true, "onPlantReseed callback must fire");
