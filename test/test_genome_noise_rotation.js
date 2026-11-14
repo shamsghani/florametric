@@ -239,4 +239,91 @@ console.log('==================================================');
   console.log('  ✓ Flower wilting stays local; old age browns gradually from the base up');
 }
 
+// -------------------------------------------------------------
+// 9. Gradual, palette-aware flower wilting; seed heads; gentle recovery; genome ageing
+// -------------------------------------------------------------
+{
+  const R = F.ProceduralFlowerRenderer;
+  const pal = F.PALETTES.botanical;
+  const fresh = R.generateGlyphs('sunflower', 300, 300, 1, 1.0, pal, 0, false, 0);
+  const half = R.generateGlyphs('sunflower', 300, 300, 1, 1.0, pal, 0, false, 0.5);
+  const spent = R.generateGlyphs('sunflower', 300, 300, 1, 1.0, pal, 0, false, 1.0);
+  const meanY = gl => gl.reduce((a, g) => a + g.y, 0) / gl.length;
+  console.log(`  Sunflower head glyphs: fresh ${fresh.length}, half-wilted ${half.length}, spent ${spent.length}`);
+  assert(fresh.length > half.length && half.length > spent.length, 'Petals must shed progressively');
+  assert(meanY(spent) > meanY(fresh) + 3, 'A wilting head must droop');
+  const freshCols = new Set(fresh.map(g => g.fg));
+  assert(half.some(g => !freshCols.has(g.fg)), 'Wilting colours must blend, not switch');
+
+  // Themes keep their look: a fully wilted flower in phosphor/amber never turns brown-red
+  for (const theme of ['phosphor', 'amber']) {
+    const tp = F.PALETTES[theme];
+    const gl = R.generateGlyphs('rose', 300, 300, 1, 1.0, tp, 0, false, 1.0);
+    const allowed = new Set([tp.wilted, tp.dead]);
+    const offTheme = gl.filter(g => {
+      const n = parseInt(g.fg.slice(1), 16);
+      const r = (n >> 16) & 255, gg = (n >> 8) & 255, b = n & 255;
+      return theme === 'phosphor' ? r > gg : b > r; // phosphor stays green, amber stays warm
+    });
+    assert.strictEqual(offTheme.length, 0, `Wilted ${theme} flower must stay on-theme (${offTheme.length} off-theme glyphs)`);
+  }
+
+  // Seed head: wilting -> seedhead (seeds drop in waves) -> rest -> new bud
+  const plant = new F.AsciiPlant({ type: 'sunflower', age: 5.0, seed: 4 });
+  const sim = plant.simulator;
+  const af = sim.members.apicalFlower;
+  af.state = 'wilting'; af.bloom = 0.15; af.wiltTimer = 0.01;
+  sim.seedRelease = 0;
+  sim.updateMembers(0.1, 1, plant.age);
+  assert.strictEqual(af.state, 'seedhead', 'A finished flower must become a seed head');
+  const head = plant.generateGlyphs(400, 600, 0, 0);
+  const petal = plant.getPalette().flowers.sunflower.petal;
+  assert(!head.some(g => g.fg === petal), 'A seed head has no petals');
+  for (let t = 0; t < af.seedDuration + 1 && af.state === 'seedhead'; t += 0.25) sim.updateMembers(0.25, 1, plant.age);
+  assert.strictEqual(sim.seedRelease, 3, 'Seeds must drop in three waves');
+  assert.strictEqual(af.state, 'dead', 'After dropping its seeds the head rests before the next bud');
+
+  // Sunlight re-opens a spent flower gradually instead of snapping to full bloom
+  af.state = 'seedhead'; af.seedTimer = 3; af.seedDuration = 10; af.bloom = 0;
+  plant.feed(0.3);
+  assert.strictEqual(af.state, 'opening', 'Fed flower re-opens');
+  assert(af.bloom < 0.6, `Fed flower starts half-open (bloom ${af.bloom})`);
+
+  // Genome: long-lived, vigorous plants brown later at the same age
+  const hardy = new F.AsciiPlant({ type: 'iris', age: 22.0, seed: 9, genome: { lifeFactor: 1.4, vigor: 1.25 } });
+  const frail = new F.AsciiPlant({ type: 'iris', age: 22.0, seed: 9, genome: { lifeFactor: 0.7, vigor: 0.8 } });
+  const aH = hardy.simulator.simulate(22.0).ageing;
+  const aF = frail.simulator.simulate(22.0).ageing;
+  console.log(`  Visible ageing at age 22: hardy ${aH.toFixed(2)}, frail ${aF.toFixed(2)}`);
+  assert(aH < aF, 'Hardy genomes must brown later than frail ones');
+  console.log('  ✓ Gradual petal shedding, on-theme wilting, seed heads, gentle recovery & genome ageing');
+}
+
+// -------------------------------------------------------------
+// 10. growTo(): scrubbing biological age regrows a consistent specimen
+// -------------------------------------------------------------
+{
+  const plant = new F.AsciiPlant({ type: 'sunflower', seed: 42, age: 1.0, bloom: null });
+  const glyphsAt = age => { plant.growTo(age); return JSON.stringify(plant.generateGlyphs(300, 600, 0, 0)); };
+
+  plant.growTo(0.15);
+  const sprout = plant.simulator.simulate(plant.age, null, 0, 0);
+  assert.strictEqual(plant.effectiveBloom, 0, 'A 15% sprout has no open flower');
+  assert(sprout.shootHeight < 200, 'A sprout is short');
+  assert.strictEqual(sprout.branches.length, 0, 'A sprout has no branches');
+
+  plant.growTo(1.0);
+  assert(plant.effectiveBloom > 0.8, 'A plant at the start of its prime is in bloom');
+
+  const a = glyphsAt(6.0);
+  glyphsAt(0.2);
+  glyphsAt(22.5);
+  const b = glyphsAt(6.0);
+  assert.strictEqual(a, b, 'Scrubbing back to the same age must show the identical plant');
+
+  plant.growTo(22.5);
+  assert(plant.simulator.simulate(plant.age).isWilting, 'Scrubbing into senescence shows an ageing plant');
+  console.log('  ✓ growTo() regrows a consistent specimen at any age (sprout, prime, senescence)');
+}
+
 console.log('\nALL GENOME, NOISE & ROTATION TESTS PASSED! 🧬');
