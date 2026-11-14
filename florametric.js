@@ -199,6 +199,25 @@
   }
 
   /**
+   * Blend two hex colours. t is quantised to `steps` levels so gradual transitions
+   * (e.g. ageing stems) still map onto a small, bounded set of colours.
+   */
+  function mixColor(a, b, t, steps = 8) {
+    const q = Math.round(clamp(t, 0, 1) * steps) / steps;
+    if (q <= 0 || typeof b !== 'string') return a;
+    if (q >= 1 || typeof a !== 'string') return b;
+    const key = `${a}|${b}|${q}`;
+    let out = _tintCache.get(key);
+    if (out === undefined) {
+      const ca = hexToRgb(a);
+      const cb = hexToRgb(b);
+      out = rgbToHex(ca[0] + (cb[0] - ca[0]) * q, ca[1] + (cb[1] - ca[1]) * q, ca[2] + (cb[2] - ca[2]) * q);
+      _tintCache.set(key, out);
+    }
+    return out;
+  }
+
+  /**
    * Shift a hex colour in HSL space. Results are quantised and memoised so a garden of
    * plants maps onto a small, bounded set of colours (important for the glyph atlas).
    */
@@ -1104,7 +1123,16 @@
         ? true
         : (growthAge > 0.38 && senescence < 0.88);
 
-      const isWilting = (senescence > 0.15) || (this.members && this.members.apicalFlower && this.members.apicalFlower.state === 'wilting');
+      // Two different things wilt and they must not be confused:
+      //  - a flower head finishing its bloom (many times per life, local to that head)
+      //  - the whole plant ageing at the end of its life (senescence)
+      const af = this.members && this.members.apicalFlower;
+      const flowerWilting = !!(af && af.state === 'wilting');
+      // 0 = fresh bloom, 1 = fully spent; drives the yellowing of the flower stalk only
+      let flowerSpent = 0;
+      if (af && af.state === 'wilting') flowerSpent = clamp(1 - af.wiltTimer / 11.0, 0, 1);
+      else if (af && af.state === 'dead') flowerSpent = clamp(af.resproutTimer / 8.0, 0, 1);
+      const isWilting = senescence > 0.15;
 
       return {
         type: this.type,
@@ -1112,6 +1140,8 @@
         growthAge,
         senescence,
         isWilting,
+        flowerWilting,
+        flowerSpent,
         isDecaying: (senescence >= 0.88),
         bloom,
         isBud,
@@ -1151,10 +1181,12 @@
       const bloom = pData.bloom;
       const age = pData.age;
 
-      const cStem = pData.isWilting ? (palette.wilted || '#7c7332') : palette.stem;
-      const cStemDark = pData.isWilting ? (palette.dead || '#4a3d1b') : palette.stemDark;
+      // Tissue is drawn in healthy colours; ageing is applied per height at the end
+      const cStem = palette.stem;
+      const cStemDark = palette.stemDark;
       const cWilted = palette.wilted;
       const cDead = palette.dead;
+      const sen = pData.senescence || 0;
 
       // Senescence completion: plant has decayed back to soil stubble & mulch
       if (pData.isDecaying) {
@@ -1275,7 +1307,7 @@
         const bladeLean = [-0.30, -0.14, 0.04, 0.18, 0.34];
         bladeHeights.forEach((bh, bIdx) => {
           const steps = Math.max(3, Math.floor(bh / 9));
-          const lean = bladeLean[bIdx] * (pData.isWilting ? 1.8 : 1.0);
+          const lean = bladeLean[bIdx] * (1.0 + 0.8 * sen);
           const sway = flutter * 28 + (pData.noise ? pData.noise.noise2(bIdx * 4.3, time * 0.5) * 3 : 0);
           const baseX = originX + bladeLean[bIdx] * 18;
           let prevX = baseX;
@@ -1283,7 +1315,7 @@
           for (let st = 1; st <= steps; st++) {
             const u = st / steps;
             const px = baseX + Math.sin(lean) * bh * u + lean * 14 * u * u + sway * u * u;
-            const py = groundY - bh * u + (pData.isWilting ? u * u * bh * 0.25 : 0);
+            const py = groundY - bh * u + u * u * bh * 0.25 * sen;
             const rot = Math.atan2(px - prevX, Math.max(0.5, prevY - py));
             const w = 2.6 * (1 - u * 0.75);
             const ca = Math.cos(rot);
@@ -1408,14 +1440,14 @@
         // Flat ribbon leaves rising from the bulb and arching outward under their own weight
         [-1, -1, 1, 1].forEach((side, li) => {
           const leafH = shootH * (li % 2 === 0 ? 0.62 : 0.48) * (0.3 + 0.7 * growthAge);
-          const spread = (li % 2 === 0 ? 30 : 46) * (pData.isWilting ? 1.6 : 1.0);
+          const spread = (li % 2 === 0 ? 30 : 46) * (1.0 + 0.6 * sen);
           const steps = Math.max(3, Math.floor(leafH / 9));
           let prevX = originX + side * 5;
           let prevY = groundY;
           for (let st = 1; st <= steps; st++) {
             const u = st / steps;
             const px = originX + side * (5 + spread * u * u) + flutter * 30 * u * u;
-            const py = groundY - leafH * Math.sin(u * Math.PI * 0.42) / Math.sin(Math.PI * 0.42) + (pData.isWilting ? u * u * leafH * 0.35 : 0);
+            const py = groundY - leafH * Math.sin(u * Math.PI * 0.42) / Math.sin(Math.PI * 0.42) + u * u * leafH * 0.35 * sen;
             const rot = Math.atan2(px - prevX, prevY - py);
             const ca = Math.cos(rot);
             const sa = Math.sin(rot);
@@ -1522,7 +1554,8 @@
         if (bBloom > 0.15) {
           const tip = along(b.length);
           const secFlower = ProceduralFlowerRenderer.generateGlyphs(
-            pType, tip.x, tip.y, fScale * 0.65, bBloom, palette, time, false, (pData.isWilting || isWithering),
+            pType, tip.x, tip.y, fScale * 0.65, bBloom, palette, time, false,
+            (pData.isWilting || isWithering || (bFlower && bFlower.state === 'wilting')),
             b.side * b.angle * 0.4 + (pData.windLean || 0), pData.variant
           );
           glyphs.push(...secFlower);
@@ -1540,13 +1573,44 @@
 
       if (pData.isBud) {
         const flowerGlyphs = ProceduralFlowerRenderer.generateGlyphs(
-          pType, tiltX, tiltY, fScale, bloom, palette, time, seedsBlown, pData.isWilting,
+          pType, tiltX, tiltY, fScale, bloom, palette, time, seedsBlown, (pData.isWilting || pData.flowerWilting),
           tilt * 0.5 + (pData.windLean || 0), pData.variant
         );
         glyphs.push(...flowerGlyphs);
       }
 
+      BotanicalArchitect._applyAgeing(glyphs, pData, groundY, palette);
       return glyphs;
+    }
+
+    /**
+     * Recolour green tissue by height:
+     *  - senescence browns the plant from the base upward (green -> straw -> brown),
+     *    so the tip stays green longest, as in real plants;
+     *  - a spent flower yellows only the top of its own stalk (peduncle), fading back
+     *    as the next bud forms. A finished flower never browns the whole plant.
+     */
+    static _applyAgeing(glyphs, pData, groundY, palette) {
+      const sen = pData.senescence || 0;
+      const spent = pData.flowerSpent || 0;
+      if (sen <= 0 && spent <= 0) return;
+      const stem = palette.stem;
+      const stemDark = palette.stemDark;
+      const straw = palette.wilted || '#b08e2f';
+      const brown = palette.dead || '#7d5c28';
+      const strawDark = mixColor(straw, brown, 0.5);
+      const h = Math.max(1, pData.shootHeight);
+
+      for (let i = 0; i < glyphs.length; i++) {
+        const g = glyphs[i];
+        if (g.fg !== stem && g.fg !== stemDark) continue;
+        const yFrac = clamp((groundY - g.y) / h, 0, 1.2);
+        let a = smoothstep(yFrac * 0.55, yFrac * 0.55 + 0.45, sen);
+        if (spent > 0 && yFrac > 0.8) a = Math.max(a, spent * 0.3 * Math.min(1, (yFrac - 0.8) / 0.2));
+        if (a <= 0) continue;
+        const mid = g.fg === stem ? straw : strawDark;
+        g.fg = a < 0.5 ? mixColor(g.fg, mid, a * 2) : mixColor(mid, brown, (a - 0.5) * 2);
+      }
     }
   }
 
