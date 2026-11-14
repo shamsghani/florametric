@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let studioCanvas = null;
   let studioCtx = null;
   let studioTime = 0;
+  let studioDt = 0.016;
+  const codexGardens = [];
   let studioWind = 0.60;
   let studioAnimId = null;
   let studioBloomCanvas = null;
@@ -63,19 +65,29 @@ document.addEventListener('DOMContentLoaded', () => {
     navBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
     tabViews.forEach(v => v.classList.toggle('active', v.id === `view-${tabId}`));
 
+    // Only the visible view animates; hidden canvases cost nothing
+    if (garden && tabId !== 'garden') garden.stop();
+    if (tabId !== 'codex') codexGardens.forEach(g => g.stop());
+
     if (tabId === 'garden') {
       if (!garden) {
         initGarden();
       } else {
         garden.resize();
+        garden.start();
       }
     } else if (tabId === 'studio') {
       initStudio();
     } else if (tabId === 'codex') {
       initCodex();
+      codexGardens.forEach(g => g.start());
     } else if (tabId === 'embed') {
       initMeadowArchitect();
     }
+  }
+
+  function describeGenome(g) {
+    return `life ×${g.lifeFactor.toFixed(2)}, size ×${g.size.toFixed(2)}, branching ×${g.branching.toFixed(2)}`;
   }
 
   // =========================================================================
@@ -100,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     garden.onSeedGerminate = (plant, x) => {
       playChime(523);
       setTimeout(() => playChime(659), 120);
-      showToast('A dandelion parachute seed sprouted in the soil! 🌱');
+      showToast(`A ${plant.type} seed took root — generation ${plant.genome.generation} 🌱`);
     };
 
     // Populate initial meadow with diverse botanical species
@@ -168,16 +180,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const speciesList = AsciiPlants.SPECIES;
         const randomSpecies = speciesList[Math.floor(Math.random() * speciesList.length)];
 
-        garden.addPlant(clickX, {
+        const sown = garden.addPlant(clickX, {
           type: randomSpecies,
           age: 0.05,
           height: 280 + Math.random() * 120,
           curvature: (Math.random() - 0.5) * 0.6,
-          seed: Math.floor(Math.random() * 10000)
+          seed: Math.floor(Math.random() * 1000000)
         });
 
         playChime(320 + Math.random() * 200);
-        showToast(`Sowed new ${randomSpecies} seed 🌱`);
+        showToast(`Sowed ${randomSpecies} 🌱 (${describeGenome(sown.genome)})`);
         return;
       }
 
@@ -265,7 +277,6 @@ document.addEventListener('DOMContentLoaded', () => {
       garden.addPlant(x, {
         type: sp,
         age: baseAge + (Math.random() - 0.5) * 0.4,
-        metabolicRate: 0.75 + Math.random() * 0.50,
         height: 290 + Math.random() * 90,
         curvature: (Math.random() - 0.5) * 0.5,
         seed: Math.floor(Math.random() * 100000)
@@ -278,6 +289,22 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
 
   function initStudio() {
+    // The specimen must exist before the controls (the genome panel reads it)
+    if (!studioPlant) {
+      studioPlant = new AsciiPlants.AsciiPlant({
+        type: 'sunflower',
+        age: 1.0,
+        bloom: null, // auto: the flower follows the plant's age
+        height: 380,
+        curvature: 0.15,
+        leafDensity: 1.0,
+        seed: 42,
+        palette: 'botanical',
+        interactive: true
+      });
+      studioPlant.growTo(studioPlant.age);
+    }
+
     if (!studioCanvas) {
       studioCanvas = document.getElementById('studio-canvas');
       studioCtx = studioCanvas.getContext('2d');
@@ -286,21 +313,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     resizeStudioCanvas();
-
-    if (!studioPlant) {
-      studioPlant = new AsciiPlants.AsciiPlant({
-        type: 'sunflower',
-        age: 1.0,
-        bloom: 1.0,
-        height: 380,
-        curvature: 0.15,
-        leafDensity: 1.0,
-        seed: 42,
-        palette: 'botanical',
-        interactive: true
-      });
-    }
-
     initStudioGrass();
     startStudioLoop();
   }
@@ -342,6 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const dt = Math.min(0.1, (now - lastTime) / 1000);
       lastTime = now;
       studioTime += dt;
+      studioDt = dt;
 
       if (studioPlant) studioPlant.update(dt, 1.0);
 
@@ -375,20 +388,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Render living meadow grass at specimen base
     if (studioGrass.length > 0) {
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
       const pal = studioPlant.getPalette();
+      const grassGlyphs = [];
       studioGrass.forEach(g => {
-        g.update(0.016, 1.0);
-        const glyphs = g.generateGlyphs(studioTime, studioWind, studioPlant.pointer, pal);
-        glyphs.forEach(glyph => {
-          ctx.font = `${glyph.size}px monospace`;
-          ctx.fillStyle = glyph.fg;
-          ctx.fillText(glyph.char, glyph.x, glyph.y);
-        });
+        g.update(studioDt, 1.0);
+        grassGlyphs.push(...g.generateGlyphs(studioTime, studioWind, studioPlant.pointer, pal));
       });
-      ctx.restore();
+      AsciiPlants.GlyphRenderer.shared.draw(ctx, grassGlyphs);
     }
 
     // Render plant
@@ -426,7 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const simData = studioPlant.simulator.simulate(studioPlant.age, studioPlant.bloom);
     document.getElementById('stat-leaves').textContent = `Active Leaves: ${simData.activeLeafCount}`;
     document.getElementById('stat-energy').textContent = `Leaf Energy: ${simData.flowerScale.toFixed(2)}x`;
-    document.getElementById('stat-branch').textContent = `Secondary Shoot: ${simData.secondaryShoot ? 'Active' : 'Dormant'}`;
+    document.getElementById('stat-branch').textContent = `Secondary Shoots: ${simData.branchCount}`;
   }
 
   function setupStudioEvents() {
@@ -477,27 +483,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const sHeight = document.getElementById('slider-height');
     const sCurvature = document.getElementById('slider-curvature');
     const sWind = document.getElementById('slider-wind');
-    const sLeafDensity = document.getElementById('slider-leaf-density');
     const sPointer = document.getElementById('select-pointer-mode');
     const sPalette = document.getElementById('select-palette');
 
     sSpecies.addEventListener('change', e => {
-      studioPlant.type = e.target.value;
-      studioPlant.simulator.type = e.target.value;
+      setStudioSpecies(e.target.value);
     });
 
     sAge.addEventListener('input', e => {
-      const val = parseFloat(e.target.value);
-      studioPlant.setAge(val);
-      let label = '';
-      if (val <= 1.0) {
-        label = `${Math.round(val * 100)}% (Growth)`;
-      } else if (val <= 21.0) {
-        label = `Mature Prime (${Math.round(((val - 1.0) / 20.0) * 100)}%)`;
-      } else {
-        label = `Senescence (${Math.round(((val - 21.0) / 2.5) * 100)}%)`;
-      }
-      document.getElementById('val-age').textContent = label;
+      // Regrow the specimen to this age (leaves, branches and flower included) and let
+      // the flower follow the age again
+      studioPlant.bloom = null;
+      studioPlant.growTo(parseFloat(e.target.value));
+      syncAgeControls();
     });
 
     sBloom.addEventListener('input', e => {
@@ -505,6 +503,8 @@ document.addEventListener('DOMContentLoaded', () => {
       studioPlant.setBloom(val);
       document.getElementById('val-bloom').textContent = `${Math.round(val * 100)}%`;
     });
+
+    syncAgeControls();
 
     sHeight.addEventListener('input', e => {
       const val = parseInt(e.target.value, 10);
@@ -525,12 +525,6 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('val-wind').textContent = studioWind.toFixed(2);
     });
 
-    sLeafDensity.addEventListener('input', e => {
-      const val = parseFloat(e.target.value);
-      studioPlant.leafDensity = val;
-      studioPlant.simulator.leafDensity = val;
-      document.getElementById('val-leaf-density').textContent = `${val.toFixed(1)}x`;
-    });
 
     sPointer.addEventListener('change', e => {
       studioPlant.pointerMode = e.target.value;
@@ -542,29 +536,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Randomize DNA Seed
     document.getElementById('btn-randomize-seed').addEventListener('click', () => {
-      const newSeed = Math.floor(Math.random() * 100000);
+      const newSeed = Math.floor(Math.random() * 1000000);
       studioPlant.seed = newSeed;
-      studioPlant.simulator.seed = newSeed;
-      studioPlant.simulator.rng = new AsciiPlants.AsciiPlant({ seed: newSeed }).simulator.rng;
-      showToast(`DNA Seed: #${newSeed}`);
+      studioPlant.simulator.reseedGenetics(newSeed, AsciiPlants.Genome.random(studioPlant.type, newSeed));
+      studioPlant.metabolicRate = studioPlant.genome.vigor;
+      studioPlant.growTo(studioPlant.age);
+      syncGenomeControls();
+      showToast(`DNA Seed: #${newSeed} (${describeGenome(studioPlant.genome)})`);
     });
+
+    buildGenomeControls();
 
     // Studio Feed Button
     document.getElementById('btn-studio-feed').addEventListener('click', () => {
       studioPlant.feed(0.35);
       studioGrass.forEach(g => g.feed(0.5));
-      // Accelerate growth smoothly
-      studioPlant.setAge(Math.min(1.0, studioPlant.age + 0.15));
+      // Sunlight speeds up a growing plant and pulls an ageing one back toward its prime;
+      // a plant in its prime keeps its age (feeding revives wilting members instead)
+      const age = studioPlant.age;
+      if (age < 1.0) studioPlant.setAge(Math.min(1.0, age + 0.15));
+      else if (age > 21.0) studioPlant.setAge(Math.max(20.9, age - 1.2));
       if (studioPlant.bloom !== null) {
         studioPlant.setBloom(Math.min(1.0, studioPlant.bloom + 0.2));
       }
-      // Update slider positions
-      document.getElementById('slider-age').value = studioPlant.age;
-      document.getElementById('val-age').textContent = `${Math.round(studioPlant.age * 100)}%`;
-      if (studioPlant.bloom !== null) {
-        document.getElementById('slider-bloom').value = studioPlant.bloom;
-        document.getElementById('val-bloom').textContent = `${Math.round(studioPlant.bloom * 100)}%`;
-      }
+      syncAgeControls();
       playChime(660);
       showToast('Specimen nourished with sunlight! ☀️');
     });
@@ -591,6 +586,76 @@ document.addEventListener('DOMContentLoaded', () => {
       link.click();
       showToast('PNG image downloaded!');
     });
+  }
+
+  function ageLabel(val) {
+    if (val <= 1.0) return `${Math.round(val * 100)}% (Growth)`;
+    if (val <= 21.0) return `Mature Prime (${Math.round(((val - 1.0) / 20.0) * 100)}%)`;
+    return `Senescence (${Math.round(Math.min(1, (val - 21.0) / 2.5) * 100)}%)`;
+  }
+
+  function syncAgeControls() {
+    document.getElementById('slider-age').value = studioPlant.age;
+    document.getElementById('val-age').textContent = ageLabel(studioPlant.age);
+    const auto = studioPlant.bloom === null;
+    const b = studioPlant.effectiveBloom;
+    document.getElementById('slider-bloom').value = b;
+    document.getElementById('val-bloom').textContent = auto ? `Auto (${Math.round(b * 100)}%)` : `${Math.round(b * 100)}%`;
+  }
+
+  function setStudioSpecies(type) {
+    studioPlant.type = type;
+    studioPlant.simulator.type = type;
+    studioPlant.setGenome({ species: type });
+    studioPlant.growTo(studioPlant.age);
+  }
+
+  const GENOME_SLIDERS = [
+    { key: 'lifeFactor', label: 'Life factor' },
+    { key: 'vigor', label: 'Vigor (growth rate)' },
+    { key: 'branching', label: 'Branching' },
+    { key: 'leafing', label: 'Leafing' },
+    { key: 'flowering', label: 'Flowering' },
+    { key: 'size', label: 'Size' },
+    { key: 'hue', label: 'Petal hue' },
+    { key: 'shapeNoise', label: 'Shape noise' },
+    { key: 'growthNoise', label: 'Growth noise' }
+  ];
+
+  function buildGenomeControls() {
+    const host = document.getElementById('genome-controls');
+    if (!host) return;
+    host.innerHTML = '';
+    GENOME_SLIDERS.forEach(({ key, label }) => {
+      const [lo, hi] = AsciiPlants.TRAIT_RANGES[key];
+      const row = document.createElement('div');
+      row.innerHTML = `
+        <div class="slider-header">
+          <label for="gene-${key}">${label}</label>
+          <span id="val-gene-${key}" class="val-badge"></span>
+        </div>
+        <input type="range" id="gene-${key}" min="${lo}" max="${hi}" step="0.01" class="ctrl-slider">`;
+      host.appendChild(row);
+      row.querySelector('input').addEventListener('input', e => {
+        studioPlant.setGenome({ [key]: parseFloat(e.target.value) });
+        studioPlant.growTo(studioPlant.age);
+        syncGenomeControls();
+      });
+    });
+    syncGenomeControls();
+  }
+
+  function syncGenomeControls() {
+    const g = studioPlant.genome;
+    GENOME_SLIDERS.forEach(({ key }) => {
+      const input = document.getElementById(`gene-${key}`);
+      const badge = document.getElementById(`val-gene-${key}`);
+      if (!input) return;
+      input.value = g[key];
+      badge.textContent = key === 'hue' ? `${g[key] >= 0 ? '+' : ''}${g[key].toFixed(2)}` : `×${g[key].toFixed(2)}`;
+    });
+    const gen = document.getElementById('val-generation');
+    if (gen) gen.textContent = `Gen ${g.generation} · ${g.habit.replace('_', ' ')}`;
   }
 
   // =========================================================================
@@ -643,15 +708,18 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
         const cCanvas = document.getElementById(`codex-canvas-${sp.id}`);
         if (!cCanvas) return;
-        const cGarden = new AsciiPlants.AsciiGarden(cCanvas, { wind: 0.45, palette: 'botanical' });
+        const cGarden = new AsciiPlants.AsciiGarden(cCanvas, { wind: 0.45, palette: 'botanical', lifecycle: 'respawn' });
+        // Canonical specimen: standard size & colours, scaled to leave head-room in the card
         cGarden.addPlant(cCanvas.clientWidth / 2 || 130, {
           type: sp.id,
           age: 1.0,
           bloom: 1.0,
-          height: 150,
+          height: Math.max(90, Math.min(150, (cCanvas.clientHeight || 260) - 150)),
+          genome: { size: 0.9, hue: 0, saturation: 0, lightness: 0 },
           interactive: true
         });
-        cGarden.start();
+        codexGardens.push(cGarden);
+        if (activeTab === 'codex') cGarden.start();
       }, 50);
     });
 
@@ -661,10 +729,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (inspectBtn) {
         const spType = inspectBtn.dataset.type;
         document.getElementById('select-species').value = spType;
-        if (studioPlant) {
-          studioPlant.type = spType;
-          studioPlant.simulator.type = spType;
-        }
+        if (studioPlant) setStudioSpecies(spType);
         switchTab('studio');
         return;
       }
