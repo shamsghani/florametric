@@ -204,13 +204,15 @@ console.log('--- Testing Dense Rose, Tulip, and Venus Flytrap Geometries ---');
   const palette = Florametric.PALETTES.botanical;
 
   // 1. Dense English Rose
+  // Each individual's colours are tinted by its genome, so compare against its own palette
   const rosePlant = new Florametric.AsciiPlant({ type: 'rose', age: 1.0, bloom: 1.0, height: 350 });
   const roseGlyphs = rosePlant.generateGlyphs(200, 400);
+  const rosePal = rosePlant.getPalette().flowers.rose;
   const roseFlowerGlyphs = roseGlyphs.filter(g =>
-    g.fg === palette.flowers.rose.petal ||
-    g.fg === palette.flowers.rose.dark ||
-    g.fg === palette.flowers.rose.light ||
-    g.fg === palette.flowers.rose.sepal
+    g.fg === rosePal.petal ||
+    g.fg === rosePal.dark ||
+    g.fg === rosePal.light ||
+    g.fg === rosePal.sepal
   );
   console.log(`Rose flower glyph count: ${roseFlowerGlyphs.length} (dense target >= 60)`);
   assert(roseFlowerGlyphs.length >= 60, `Rose must be dense with >= 60 glyphs, got ${roseFlowerGlyphs.length}`);
@@ -218,10 +220,11 @@ console.log('--- Testing Dense Rose, Tulip, and Venus Flytrap Geometries ---');
   // 2. Dense Sculpted Tulip Chalice
   const tulipPlant = new Florametric.AsciiPlant({ type: 'tulip', age: 1.0, bloom: 1.0, height: 350 });
   const tulipGlyphs = tulipPlant.generateGlyphs(200, 400);
+  const tulipPal = tulipPlant.getPalette().flowers.tulip;
   const tulipFlowerGlyphs = tulipGlyphs.filter(g =>
-    g.fg === palette.flowers.tulip.petal ||
-    g.fg === palette.flowers.tulip.inner ||
-    g.fg === palette.flowers.tulip.stamen
+    g.fg === tulipPal.petal ||
+    g.fg === tulipPal.inner ||
+    g.fg === tulipPal.stamen
   );
   console.log(`Tulip flower glyph count: ${tulipFlowerGlyphs.length} (dense target >= 45)`);
   assert(tulipFlowerGlyphs.length >= 45, `Tulip must be dense with >= 45 glyphs, got ${tulipFlowerGlyphs.length}`);
@@ -229,10 +232,11 @@ console.log('--- Testing Dense Rose, Tulip, and Venus Flytrap Geometries ---');
   // 3. Dense Venus Flytrap Bivalve Trap
   const flytrapPlant = new Florametric.AsciiPlant({ type: 'flytrap', age: 1.0, bloom: 1.0, height: 350 });
   const flytrapGlyphs = flytrapPlant.generateGlyphs(200, 400);
+  const flyPal = flytrapPlant.getPalette().flowers.flytrap;
   const flytrapFlowerGlyphs = flytrapGlyphs.filter(g =>
-    g.fg === palette.flowers.flytrap.jaw ||
-    g.fg === palette.flowers.flytrap.inside ||
-    g.fg === palette.flowers.flytrap.teeth ||
+    g.fg === flyPal.jaw ||
+    g.fg === flyPal.inside ||
+    g.fg === flyPal.teeth ||
     g.fg === '#fff677'
   );
   console.log(`Flytrap jaw glyph count: ${flytrapFlowerGlyphs.length} (dense target >= 50)`);
