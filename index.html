@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Florametric — Parametric Living ASCII Flowers & Plants</title>
+  <meta name="description" content="A generative mathematical engine for glowing, living ASCII flowers and plants. Zero dependencies, 100% parametric, GitHub Pages ready.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="brand">
+      <span class="brand-glyph">✿</span>
+      <span class="brand-title">FLORAMETRIC</span>
+      <span class="brand-badge">MATH ENGINE</span>
+    </div>
+
+    <nav class="nav-tabs">
+      <button class="nav-btn active" data-tab="garden">
+        <span class="btn-icon">🌱</span> The Meadow
+      </button>
+      <button class="nav-btn" data-tab="studio">
+        <span class="btn-icon">🔬</span> Parametric Lab
+      </button>
+      <button class="nav-btn" data-tab="codex">
+        <span class="btn-icon">📖</span> Species Codex
+      </button>
+      <button class="nav-btn" data-tab="embed">
+        <span class="btn-icon">💻</span> Integration Guide
+      </button>
+    </nav>
+
+    <div class="nav-actions">
+      <button id="btn-nourish-toggle" class="action-btn" title="Toggle Sunlight / Plant Food Nourish Mode">
+        <span class="icon">☀️</span> <span class="lbl">Nourish: Off</span>
+      </button>
+      <button id="btn-wind-toggle" class="action-btn" title="Toggle Wind Gusts">
+        <span class="icon">💨</span> <span class="lbl">Breeze: Med</span>
+      </button>
+      <button id="btn-sound-toggle" class="action-btn" title="Toggle Ambient Audio Chimes">
+        <span class="icon">🔔</span> <span class="lbl">Sound: Off</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Viewport Container -->
+  <main class="viewport">
+
+    <!-- VIEW 1: THE MEADOW (GARDEN) -->
+    <section id="view-garden" class="tab-view active">
+      <canvas id="garden-canvas"></canvas>
+      
+      <!-- Garden Overlay Prompt -->
+      <div class="garden-hud">
+        <div class="hud-pill">
+          <span class="pulse-dot"></span> Click anywhere on the soil line to sow a new plant &bull; Move cursor to interact
+        </div>
+        <div class="garden-controls">
+          <button id="btn-sunlight-burst" class="hud-btn primary">Shower Sunlight ☀️</button>
+          <button id="btn-clear-garden" class="hud-btn">Clear Garden</button>
+          <button id="btn-flower-all" class="hud-btn">Bloom All ✿</button>
+          <button id="btn-preset-wildflower" class="hud-btn">Plant Wildflower Meadow</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: THE PARAMETRIC LAB -->
+    <section id="view-studio" class="tab-view">
+      <div class="studio-layout">
+        
+        <!-- Live Plant Canvas Viewport -->
+        <div class="studio-display">
+          <canvas id="studio-canvas"></canvas>
+          
+          <div class="display-stats">
+            <span id="stat-leaves">Active Leaves: 4</span> &bull;
+            <span id="stat-energy">Leaf Energy: 1.05x</span> &bull;
+            <span id="stat-branch">Secondary Shoot: Active</span>
+          </div>
+
+          <!-- Quick Action Buttons -->
+          <div class="display-actions">
+            <button id="btn-studio-feed" class="export-btn" title="Shower specimen with sunlight to accelerate growth">
+              <span>☀️</span> Feed Sunlight
+            </button>
+            <button id="btn-copy-ascii" class="export-btn">
+              <span>📋</span> Copy Plain ASCII
+            </button>
+            <button id="btn-copy-tag" class="export-btn">
+              <span>💻</span> Copy &lt;florametric-plant&gt; Tag
+            </button>
+            <button id="btn-download-png" class="export-btn">
+              <span>💾</span> Download PNG
+            </button>
+          </div>
+        </div>
+
+        <!-- Parametric Controls Dock -->
+        <aside class="studio-panel">
+          <div class="panel-header">
+            <h3>Parametric DNA & Physics</h3>
+            <button id="btn-randomize-seed" class="seed-btn" title="Generate New DNA Seed">🎲 Randomize</button>
+          </div>
+
+          <div class="control-group">
+            <label for="select-species">Botanical Species</label>
+            <select id="select-species" class="ctrl-select">
+              <option value="sunflower">Golden Sunflower (Helianthus)</option>
+              <option value="hibiscus">Tropical Hibiscus (Rosa-sinensis)</option>
+              <option value="iris">Royal Purple Iris (Iris)</option>
+              <option value="thistle">Wild Thistle (Cirsium)</option>
+              <option value="marigold">French Marigold (Tagetes)</option>
+              <option value="daffodil">Golden Daffodil (Narcissus)</option>
+              <option value="rose">Velvet Rose (Rosa)</option>
+              <option value="dandelion">Dandelion Clock (Taraxacum)</option>
+              <option value="tulip">Garden Tulip (Tulipa)</option>
+              <option value="flytrap">Venus Flytrap (Dionaea)</option>
+            </select>
+          </div>
+
+          <!-- Biological Age Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-age">Biological Age / Growth</label>
+              <span id="val-age" class="val-badge">100%</span>
+            </div>
+            <input type="range" id="slider-age" min="0.05" max="1.0" step="0.01" value="1.0" class="ctrl-slider">
+            <div class="growth-milestones">
+              <span>Sprout</span>
+              <span>Internodes</span>
+              <span>Branching</span>
+              <span>Mature</span>
+            </div>
+          </div>
+
+          <!-- Flower Bloom Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-bloom">Blossom Bloom Expansion</label>
+              <span id="val-bloom" class="val-badge">Auto (100%)</span>
+            </div>
+            <input type="range" id="slider-bloom" min="0.0" max="1.0" step="0.01" value="1.0" class="ctrl-slider">
+          </div>
+
+          <!-- Stem Height Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-height">Shoot Max Height</label>
+              <span id="val-height" class="val-badge">380px</span>
+            </div>
+            <input type="range" id="slider-height" min="180" max="500" step="10" value="380" class="ctrl-slider">
+          </div>
+
+          <!-- Curvature / Lean Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-curvature">Stem Curvature / Phototropism</label>
+              <span id="val-curvature" class="val-badge">0.15</span>
+            </div>
+            <input type="range" id="slider-curvature" min="-1.0" max="1.0" step="0.05" value="0.15" class="ctrl-slider">
+          </div>
+
+          <!-- Wind Reactivity Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-wind">Wind Harmonic Sway</label>
+              <span id="val-wind" class="val-badge">0.60</span>
+            </div>
+            <input type="range" id="slider-wind" min="0.0" max="1.5" step="0.05" value="0.60" class="ctrl-slider">
+          </div>
+
+          <!-- Leaf Density Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-leaf-density">Phyllotaxis Leaf Density</label>
+              <span id="val-leaf-density" class="val-badge">1.0x</span>
+            </div>
+            <input type="range" id="slider-leaf-density" min="0.5" max="2.0" step="0.1" value="1.0" class="ctrl-slider">
+          </div>
+
+          <!-- Pointer Interaction Mode -->
+          <div class="control-group">
+            <label for="select-pointer-mode">Pointer / Cursor Behavior</label>
+            <select id="select-pointer-mode" class="ctrl-select">
+              <option value="reach">Heliotropic Reach (Bends towards cursor)</option>
+              <option value="flinch">Thigmotropic Flinch (Bends away)</option>
+              <option value="none">No Pointer Reactivity</option>
+            </select>
+          </div>
+
+          <!-- Color Palette Dropdown -->
+          <div class="control-group">
+            <label for="select-palette">Chromatic Aesthetic</label>
+            <select id="select-palette" class="ctrl-select">
+              <option value="botanical">Glowing Botanical (Authentic Colors)</option>
+              <option value="phosphor">Matrix Phosphor Green</option>
+              <option value="amber">1982 Terminal Amber</option>
+              <option value="cyberpunk">Cyberpunk Neon</option>
+              <option value="monochrome">Pure Monochrome White</option>
+            </select>
+          </div>
+
+        </aside>
+      </div>
+    </section>
+
+    <!-- VIEW 3: SPECIES CODEX -->
+    <section id="view-codex" class="tab-view">
+      <div class="codex-container">
+        <div class="codex-header">
+          <h2>The Botanical Species Codex</h2>
+          <p>Procedural mathematical models rendered live with continuous harmonic physics.</p>
+        </div>
+        <div id="codex-grid" class="codex-grid">
+          <!-- Dynamically filled with animated cards -->
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: INTEGRATION GUIDE -->
+    <section id="view-embed" class="tab-view">
+      <div class="docs-container">
+        <div class="docs-header">
+          <h2>How to Add ASCII Plants to Your Projects</h2>
+          <p>Zero dependencies. Runs in any browser, blog, GitHub README, or terminal CLI.</p>
+        </div>
+
+        <div class="docs-card">
+          <h3>Option 1: Drop-In Web Component (Zero JavaScript Needed)</h3>
+          <p>Drop the script into your <code>&lt;head&gt;</code> and use the custom element anywhere in your HTML:</p>
+          <pre><code>&lt;!-- 1. Include the standalone library --&gt;
+&lt;script src="https://shamsghani.github.io/florametric/florametric.js"&gt;&lt;/script&gt;
+
+&lt;!-- 2. Embed an animated, cursor-reactive flower --&gt;
+&lt;florametric-plant type="sunflower" age="1.0" bloom="1.0" interactive&gt;&lt;/florametric-plant&gt;
+&lt;florametric-plant type="hibiscus" palette="botanical"&gt;&lt;/florametric-plant&gt;
+&lt;florametric-plant type="iris" height="400"&gt;&lt;/florametric-plant&gt;</code></pre>
+        </div>
+
+        <div class="docs-card">
+          <h3>Option 2: Vanilla JavaScript API (Custom Canvas or Garden)</h3>
+          <p>Create an interactive garden or single plant programmatically:</p>
+          <pre><code>import { AsciiPlant, AsciiGarden } from './florametric.js';
+
+// Create multi-plant interactive garden
+const garden = new AsciiGarden('#my-canvas', { wind: 0.7, palette: 'botanical' });
+garden.addPlant(200, { type: 'sunflower', age: 1.0 });
+garden.addPlant(400, { type: 'hibiscus', age: 0.8 });
+garden.start(); // 60 FPS wind & cursor tracking</code></pre>
+        </div>
+
+        <div class="docs-card">
+          <h3>Option 3: Static ASCII Text Generator (For READMEs & Terminal CLIs)</h3>
+          <p>Generate pure text strings with no DOM or canvas needed:</p>
+          <pre><code>const textArt = Florametric.generateString({
+  type: 'sunflower',
+  age: 1.0,
+  bloom: 1.0
+});
+console.log(textArt);</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">Copied to clipboard!</div>
+
+  <script src="florametric.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
