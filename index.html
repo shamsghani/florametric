@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+  <meta name="theme-color" content="#050508">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Florametric — Parametric Living ASCII Flowers & Plants</title>
   <meta name="description" content="A generative mathematical engine for glowing, living ASCII flowers and plants. Zero dependencies, 100% parametric, GitHub Pages ready.">
   <link rel="stylesheet" href="styles.css">
@@ -69,15 +73,17 @@
       <!-- Garden Overlay Prompt -->
       <div class="garden-hud">
         <div class="hud-pill">
-          <span class="pulse-dot"></span> Click soil to sow &bull; Click Dandelions to blow seeds &bull; Pass of time blooms buds naturally &bull; Shower Sunlight ☀️
+          <span class="pulse-dot"></span>
+          <span class="hud-text-desktop">Click soil to sow &bull; Click Dandelions to blow seeds &bull; Natural time blooms buds &bull; Shower Sunlight ☀️</span>
+          <span class="hud-text-mobile">Tap soil to sow &bull; Tap Dandelions to blow seeds &bull; Shower Sunlight ☀️</span>
         </div>
         <div class="garden-controls">
           <button id="btn-sunlight-burst" class="hud-btn primary">Shower Sunlight ☀️</button>
-          <button id="btn-clock-cycle" class="hud-btn" title="Cycle Biological Time Passing">Time: 1x ⏱️</button>
-          <button id="btn-clear-garden" class="hud-btn">Clear Garden</button>
-          <button id="btn-flower-all" class="hud-btn">Bloom All ✿</button>
-          <button id="btn-preset-wildflower" class="hud-btn">Plant Wildflower Meadow</button>
           <button id="btn-export-meadow" class="hud-btn highlight" title="Generate persistent time-anchored embed code for this meadow">Generate Meadow Code ⌛</button>
+          <button id="btn-clock-cycle" class="hud-btn" title="Cycle Biological Time Passing">Time: 1x ⏱️</button>
+          <button id="btn-flower-all" class="hud-btn">Bloom All ✿</button>
+          <button id="btn-clear-garden" class="hud-btn">Clear Garden</button>
+          <button id="btn-preset-wildflower" class="hud-btn">Plant Wildflower Meadow</button>
         </div>
       </div>
     </section>
@@ -253,7 +259,7 @@
               <!-- 1. Starting Epoch t0 -->
               <div class="control-group">
                 <div class="slider-header">
-                  <label for="gen-t0">Starting Point (\(t_0\) Epoch)</label>
+                  <label for="gen-t0">Starting Point (t₀ Epoch)</label>
                   <button type="button" id="btn-t0-now" class="mini-btn">Right Now</button>
                 </div>
                 <input type="datetime-local" id="gen-t0" class="ctrl-input">

@@ -125,6 +125,26 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
+    // Touch interaction for smartphones and tablets
+    gardenCanvas.addEventListener('touchstart', e => {
+      if (e.touches && e.touches.length > 0) {
+        isMouseDown = true;
+        const touch = e.touches[0];
+        handleGardenInteraction({ clientX: touch.clientX, clientY: touch.clientY });
+      }
+    }, { passive: true });
+
+    gardenCanvas.addEventListener('touchmove', e => {
+      if (e.touches && e.touches.length > 0 && nourishMode) {
+        const touch = e.touches[0];
+        handleGardenInteraction({ clientX: touch.clientX, clientY: touch.clientY });
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => {
+      isMouseDown = false;
+    });
+
     function handleGardenInteraction(e) {
       const rect = gardenCanvas.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
@@ -304,7 +324,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function resizeStudioCanvas() {
     if (!studioCanvas) return;
     const rect = studioCanvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = typeof window !== 'undefined' ? Math.min(2, window.devicePixelRatio || 1) : 1;
     studioCanvas.width = (rect.width || 600) * dpr;
     studioCanvas.height = (rect.height || 600) * dpr;
     studioCtx.scale(dpr, dpr);
@@ -420,6 +440,30 @@ document.addEventListener('DOMContentLoaded', () => {
     studioCanvas.addEventListener('mouseleave', () => {
       studioPlant.pointer.active = false;
     });
+
+    const updateStudioTouch = (touch) => {
+      if (!touch) return;
+      const rect = studioCanvas.getBoundingClientRect();
+      studioPlant.pointer.x = touch.clientX - rect.left;
+      studioPlant.pointer.y = touch.clientY - rect.top;
+      studioPlant.pointer.active = true;
+    };
+
+    studioCanvas.addEventListener('touchstart', e => {
+      if (e.touches && e.touches.length > 0) {
+        updateStudioTouch(e.touches[0]);
+      }
+    }, { passive: true });
+
+    studioCanvas.addEventListener('touchmove', e => {
+      if (e.touches && e.touches.length > 0) {
+        updateStudioTouch(e.touches[0]);
+      }
+    }, { passive: true });
+
+    studioCanvas.addEventListener('touchend', () => {
+      studioPlant.pointer.active = false;
+    }, { passive: true });
 
     window.addEventListener('resize', () => {
       if (activeTab === 'studio') resizeStudioCanvas();
