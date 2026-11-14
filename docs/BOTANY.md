@@ -98,9 +98,13 @@ tendencies, and each individual's genome, seed and noise still vary within them.
   unbranched. Just below the flower it bends (the "swan neck"), so the flower faces
   **sideways**. A dry papery **spathe** sits behind the flower.
 * **Leaves:** basal, strap-shaped and flat, arching outward.
-* **Flower:** six tepals (the perianth) radiate as a star around a long cylindrical
-  **corona** (trumpet) with a ruffled rim, which projects toward the viewer's side.
-* **Bud:** a pointed bud inside the papery spathe, angled sideways.
+* **Flower:** six tepals (the perianth) radiate as a star around a **corona** (cup or
+  trumpet) with a ruffled rim. In nature the flower faces sideways, but a side view of a
+  trumpet reads as a tangle at ASCII scale, so the renderer turns the head about 30° toward
+  the viewer: the tepals start at the cup's edge, the cup is a textured ring (`% & #`) with
+  a bright ruffled rim (`~`) and a dark throat (`@ #`), and the green ovary and papery spathe
+  sit just below and behind it.
+* **Bud:** a pointed spindle inside the papery spathe, angled sideways.
 * **Parameters:** `straightness 0.95`, `kink 0`, `texture twoEdged`, `neck 16`;
   basal `strap` leaves.
 

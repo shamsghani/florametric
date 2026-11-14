@@ -641,6 +641,18 @@
       return new Genome(Object.assign(traits, overrides));
     }
 
+    /**
+     * The species' textbook individual: neutral factors, no colour shift, minimal noise.
+     * Used when a garden is created with { variation: false }.
+     */
+    static canonical(species = 'sunflower', seed = 42, overrides = {}) {
+      return new Genome(Object.assign({
+        species, seed, habit: 'erect', noiseSeed: seed,
+        lifeFactor: 1, vigor: 1, branching: 1, leafing: 1, flowering: 1, size: 1,
+        hue: 0, saturation: 0, lightness: 0, growthNoise: 0.08, shapeNoise: 0.5, windSensitivity: 1
+      }, overrides));
+    }
+
     static from(value, species, seed) {
       if (value instanceof Genome) return value;
       if (value && typeof value === 'object') return Genome.random(species, seed, value);
@@ -936,6 +948,8 @@
      * Advance Member Subcycles over time (leaves, flowers, and branches with dependency rules)
      */
     updateMembers(dt, timeSpeed = 1.0, globalAge = 0.0) {
+      // memberCycles = false: leaves & flowers mature and then stay (no wilting, no seed heads)
+      const cycles = this.memberCycles !== false;
       if (!this.members) this.initMembers();
       const effectiveDt = dt * timeSpeed;
       this.clock += effectiveDt;
@@ -958,8 +972,10 @@
 
         if (apexDist >= 0) {
           if (l.state === 'dormant') {
+            // Start from the size the leaf already has at this height (continuous with the
+            // static view), so a plant added fully grown does not shrink back to buds
             l.state = 'bud';
-            l.maturity = 0.08;
+            l.maturity = clamp((apexDist - 2) / 48, 0.08, 1.0);
             l.age = 0.0;
             l.isDead = false;
             l.isWilted = false;
@@ -974,7 +990,7 @@
 
           if (l.state === 'mature') {
             l.age += effectiveDt;
-            if (l.age >= l.lifespan || senescence > 0.15) {
+            if ((cycles && l.age >= l.lifespan) || senescence > 0.15) {
               l.state = 'wilting';
               l.isWilted = true;
               l.wiltTimer = 9.0;
@@ -1011,8 +1027,11 @@
       const af = this.members.apicalFlower;
       if (globalAge > 0.42 && senescence < 0.92) {
         if (af.state === 'dormant') {
-          af.state = 'bud';
-          af.bloom = 0.10;
+          // A seedling's flower starts as a bud; a plant added already mature starts in the
+          // bloom its age implies (same curve as the static view)
+          const start = Math.max(0.10, smoothstep(0.42, 0.88, Math.min(1, globalAge)));
+          af.bloom = start;
+          af.state = start >= 0.92 ? 'blooming' : (start >= 0.38 ? 'opening' : 'bud');
           af.age = 0.0;
         }
 
@@ -1025,7 +1044,7 @@
           if (af.bloom >= 0.92) af.state = 'blooming';
         } else if (af.state === 'blooming') {
           af.age += effectiveDt;
-          if (af.age >= af.lifespan || senescence > 0.15) {
+          if ((cycles && af.age >= af.lifespan) || senescence > 0.15) {
             af.state = 'wilting';
             af.wiltTimer = 11.0;
           }
@@ -1072,7 +1091,8 @@
         if (shootHeight >= branchStartY && globalAge > 0.45 && senescence < 0.90) {
           if (b.state === 'dormant') {
             b.state = 'growing';
-            b.currentLength = 4.0;
+            const grown = clamp((Math.min(1, globalAge) - 0.48) / 0.45, 0, 1);
+            b.currentLength = Math.max(4.0, shootHeight * b.lengthRatio * grown * (1.0 - senescence * 0.35));
             b.health = 1.0;
           }
 
@@ -1089,7 +1109,7 @@
             }
             if (bl.state === 'mature') {
               bl.age += effectiveDt;
-              if (bl.age >= bl.lifespan || senescence > 0.15) {
+              if ((cycles && bl.age >= bl.lifespan) || senescence > 0.15) {
                 bl.state = 'wilting';
               }
             } else if (bl.state === 'wilting') {
@@ -1120,7 +1140,7 @@
             if (bf.bloom >= 0.85) bf.state = 'blooming';
           } else if (bf.state === 'blooming') {
             bf.age += effectiveDt;
-            if (bf.age >= bf.lifespan || senescence > 0.15) {
+            if ((cycles && bf.age >= bf.lifespan) || senescence > 0.15) {
               bf.state = 'wilting';
             }
           } else if (bf.state === 'wilting') {
@@ -1463,6 +1483,7 @@
         // Flower heads nod with the stem tip and the gusts
         windLean: clamp((stemNodes[stemNodes.length - 1].angle || 0) * 0.6, -0.45, 0.45),
         leafFlutter: windStrength * flex * (0.08 * Math.sin(time * 3.1) + 0.12 * gust),
+        windStrength,
         shapeNoise: g.shapeNoise,
         variant: this.variant(),
         noise,
@@ -1529,7 +1550,7 @@
         bladeHeights.forEach((bh, bIdx) => {
           const steps = Math.max(3, Math.floor(bh / 9));
           const lean = bladeLean[bIdx] * (1.0 + 0.8 * sen);
-          const sway = flutter * 28 + (pData.noise ? pData.noise.noise2(bIdx * 4.3, time * 0.5) * 3 : 0);
+          const sway = flutter * 28 + (pData.noise ? pData.noise.noise2(bIdx * 4.3, time * 0.5) * 5 * Math.min(1, pData.windStrength || 0) : 0);
           const baseX = originX + bladeLean[bIdx] * 18;
           let prevX = baseX;
           let prevY = groundY;
@@ -2404,53 +2425,83 @@
     }
 
     /**
-     * Daffodil: seen from the side, six tepals radiate as a foreshortened star around a
-     * long, ruffled trumpet (corona) that points the way the flower faces; a dry papery
-     * spathe sits behind. The bud points sideways from the spathe.
+     * Daffodil (Narcissus): the flower faces sideways and a little toward the viewer,
+     * nodding slightly. Six pointed tepals form a star in that tilted plane; a long,
+     * ribbed trumpet (corona) projects out of it, ending in a flared ruffled rim around a
+     * dark throat. The green ovary and the papery spathe sit behind, where the stalk
+     * joins. The bud is a closed point emerging from the spathe.
      */
     static _buildDaffodil(out, cx, cy, s, b, pal, P, variant) {
       const face = (variant || 0) < 0.5 ? -1 : 1;
-      const fcy = cy - 18 * s;
+      s *= 1.3;           // daffodil flowers are large for the plant
+      const fcy = cy - 14 * s;
       const o = smoothstep(0.15, 1.0, b);
+      const yawS = 0.5;   // the flower is turned ~30° to the side: the cup reads face-on
+      const yawC = 0.87;
+      // (u, v) lie in the flower plane, w points out along the trumpet
+      const at = (u, v, w) => ({ x: cx + face * (u * yawC + w * yawS), y: fcy - v + w * 0.22 });
+      const size = Math.max(8, 9.5 * s);
       const spathe = mixColor(P.wilted || P.stemDark, P.stem, 0.35);
-      drawLamina(out, cx - face * 2 * s, fcy + 6 * s, -Math.PI / 2 - face * 0.6, 15 * s, 3 * s, LAMINA.lanceolate, { edge: spathe, size: Math.max(8, 9 * s) });
+      const petal = ripen(pal.petal, b, P);
+      const cup = ripen(pal.cup, b, P);
+      const throat = ripen(pal.inner, b, P);
+
+      // Ovary and papery spathe where the stalk joins, below and behind the flower
+      const ovary = at(0, -(o < 0.1 ? 0 : 9 * s), -5 * s);
+      drawLamina(out, ovary.x, ovary.y, Math.atan2(o < 0.1 ? -1 : 0.85, -face * 0.75), 14 * s, 3 * s, LAMINA.lanceolate,
+        { edge: spathe, fill: spathe, hatch: 1, texture: [':', "'"], size });
+      out.push({ x: ovary.x, y: ovary.y, char: 'o', fg: P.stem, size: Math.max(8, 10 * s) });
 
       if (o < 0.1) {
-        const a = face > 0 ? -0.35 : Math.PI + 0.35;
-        drawLamina(out, cx, fcy, a, 22 * s, 4.5 * s, LAMINA.spindle, { edge: ripen(pal.petal, b, P), fill: ripen(pal.cup, b, P), hatch: 1, size: Math.max(8, 10 * s) });
+        // Closed bud pointing forward and down out of its sheath
+        const a = Math.atan2(0.4, face * 0.9);
+        drawLamina(out, ovary.x, ovary.y, a, 25 * s, 5 * s, LAMINA.spindle, { edge: petal, fill: cup, hatch: 1, texture: [':'], size });
+        drawLamina(out, ovary.x, ovary.y, a, 13 * s, 5.8 * s, LAMINA.spindle, { edge: spathe, size });
         return;
       }
 
-      const kx = 0.55;
+      // Perianth: six pointed tepals in the turned flower plane. They start at the edge of
+      // the cup (which hides their bases on a real flower) so the centre stays clear.
+      const R1 = 11 * s * (0.6 + 0.4 * o);   // cup rim radius
       for (let k = 0; k < 6; k++) {
-        const a = (k * Math.PI) / 3 + Math.PI / 6;
-        const dx = Math.cos(a) * kx;
-        const dy = Math.sin(a);
+        const th = Math.PI / 2 + (k * Math.PI) / 3 + 0.06 * Math.sin(k * 2.3 + (variant || 0) * 9);
+        const dx = face * Math.cos(th) * yawC;
+        const dy = -Math.sin(th);
         const fore = Math.hypot(dx, dy);
-        drawLamina(out, cx, fcy, Math.atan2(dy, dx), 28 * s * o * fore, 8 * s * (0.4 + 0.6 * o), LAMINA.tepal, {
-          edge: ripen(pal.petal, b, P), fill: ripen(pal.petal, b, P), hatch: 1, texture: ['+', '*'], size: Math.max(8, 9.5 * s)
+        const base = at(Math.cos(th) * R1 * 0.7, Math.sin(th) * R1 * 0.7, 0);
+        const len = (27 * s * (0.35 + 0.65 * o) - R1 * 0.7) * fore;
+        const wid = 10 * s * (0.4 + 0.6 * o) * Math.hypot(Math.sin(th) * yawC, Math.cos(th));
+        drawLamina(out, base.x, base.y, Math.atan2(dy, dx), len, wid, LAMINA.tepal, {
+          edge: petal, fill: mixColor(petal, cup, 0.15), hatch: 1, texture: [':', "'"], size
         });
       }
 
-      const T = 25 * s * (0.35 + 0.65 * o);
-      const R = 9.5 * s * (0.55 + 0.45 * o);
-      const ring = (ax, rr, ruff) => {
+      // Corona: a solid orange cup projecting toward the viewer — a textured fill, a bright
+      // ruffled rim offset toward the viewer, and a dark throat
+      const T = 10 * s * (0.3 + 0.7 * o);
+      const ring = (r, w, ruffle, steps) => {
         const pts = [];
-        for (let j = 0; j <= 16; j++) {
-          const th = (j / 16) * Math.PI * 2;
-          const rad = rr * (1 + ruff * Math.sin(th * 9));
-          pts.push({ x: ax + Math.cos(th) * rad * 0.38, y: fcy + Math.sin(th) * rad });
+        for (let j = 0; j <= steps; j++) {
+          const ph = (j / steps) * Math.PI * 2;
+          const rr = r * (1 + ruffle * Math.sin(ph * 9));
+          pts.push(at(rr * Math.cos(ph), rr * Math.sin(ph), w));
         }
         return pts;
       };
-      const cup = ripen(pal.cup, b, P);
-      strokeAlong(out, [{ x: cx, y: fcy - R * 0.85 }, { x: cx + face * T, y: fcy - R * 1.15 }], cup, Math.max(8, 9 * s));
-      strokeAlong(out, [{ x: cx, y: fcy + R * 0.85 }, { x: cx + face * T, y: fcy + R * 1.15 }], cup, Math.max(8, 9 * s));
-      for (let j = 0; j < 4; j++) {
-        const t = j / 3;
-        strokeAlong(out, ring(cx + face * T * t, R * (0.85 + 0.3 * t * t), j === 3 ? 0.12 : 0), j === 0 ? ripen(pal.inner, b, P) : cup, Math.max(8, 9 * s), { char: j === 3 ? '~' : '(' });
+      strokeAlong(out, ring(R1 * 0.62, T * 0.6, 0, 18), cup, Math.max(7, 8.5 * s), { chars: ['%', '&', '%', '#'] });
+      strokeAlong(out, ring(R1, T, 0.1, 32), mixColor(cup, petal, 0.25), size);
+      for (let j = 0; j < 9; j++) {
+        const ph = ((j + 0.25) / 9) * Math.PI * 2;
+        const p = at(R1 * 1.14 * Math.cos(ph), R1 * 1.14 * Math.sin(ph), T);
+        out.push({ x: p.x, y: p.y, char: '~', fg: cup, size: Math.max(7, 8 * s), rot: ph + Math.PI / 2 });
       }
-      strokeAlong(out, ring(cx + face * T, R * 0.65, 0), ripen(pal.inner, b, P), Math.max(7, 8 * s), { chars: ['#', '%'] });
+      const c = at(0, 0, T * 0.8);
+      out.push({ x: c.x, y: c.y, char: '@', fg: throat, size: Math.max(8, 10 * s) });
+      for (let j = 0; j < 4; j++) {
+        const ph = (j / 4) * Math.PI * 2 + 0.4;
+        const p = at(R1 * 0.3 * Math.cos(ph), R1 * 0.3 * Math.sin(ph), T * 0.8);
+        out.push({ x: p.x, y: p.y, char: '#', fg: throat, size: Math.max(7, 8 * s) });
+      }
     }
 
     /**
@@ -2738,7 +2789,8 @@
      * Draw glyphs (CSS-pixel coordinates). Leaves the context with transform
      * (dpr, 0, 0, dpr, 0, 0) and globalAlpha 1.
      */
-    draw(ctx, glyphs, dpr = GlyphRenderer.scaleOf(ctx)) {
+    draw(ctx, glyphs, dpr = GlyphRenderer.scaleOf(ctx), opts = {}) {
+      const rotate = opts.rotate !== false;
       if (!ctx || !glyphs || glyphs.length === 0) return;
       if (!this.atlas || typeof ctx.setTransform !== 'function') {
         this._drawText(ctx, glyphs);
@@ -2765,7 +2817,7 @@
         const k = exact / px;
         const dw = sp.w * k;
         const dh = sp.h * k;
-        const rot = g.rot || 0;
+        const rot = rotate ? (g.rot || 0) : 0;
 
         if (rot > -0.02 && rot < 0.02) {
           if (!identity) {
@@ -3061,6 +3113,9 @@
       this.paletteName = options.palette || 'botanical';
       this.interactive = options.interactive !== false;
       this.pointerMode = options.pointerMode || 'reach';
+      // Per-plant switches (a garden's options apply on top of these)
+      this.growth = options.growth !== false;          // false: this plant never ages
+      this.flowerCycles = options.flowerCycles !== false; // false: flowers stay in bloom
 
       this.simulator = new BotanicalSimulator({
         type: this.type,
@@ -3071,6 +3126,7 @@
         branching: this.branching,
         genome: options.genome
       });
+      this.simulator.memberCycles = this.flowerCycles;
       // Metabolic rate is inherited (genome vigour) unless explicitly overridden
       this.metabolicRate = options.metabolicRate !== undefined ? options.metabolicRate : this.genome.vigor;
 
@@ -3292,59 +3348,192 @@
   // 9. THE ASCIIGARDEN CLASS (LIVING, SELF-SEEDING MEADOW)
   // =========================================================================
 
+  /**
+   * Every feature of a garden with its default. Each one can be passed when the garden is
+   * created, set as a web-component attribute (kebab-case), or changed at runtime with
+   * garden.set({ ... }).
+   */
+  const GARDEN_DEFAULTS = {
+    // Look
+    palette: 'botanical',    // botanical | phosphor | amber | cyberpunk | monochrome
+    background: '#050508',   // any CSS colour, or 'transparent'
+    glow: true,              // screen-space bloom glow
+    glowStrength: 1.0,
+    rotation: true,          // glyphs follow curves; false = classic upright ASCII
+    grass: true,             // living grass along the soil
+    soil: true,              // the dashed soil line
+    groundOffset: 50,        // px from the bottom of the canvas to the soil line
+    // Motion
+    wind: 0.6,               // breeze strength (0 = still air)
+    gusts: true,             // travelling gust fronts on top of the breeze
+    reducedMotion: null,     // null = follow prefers-reduced-motion
+    fps: 0,                  // frame-rate cap (0 = display refresh rate)
+    pauseOffscreen: true,    // stop drawing while the canvas is scrolled out of view
+    // Life
+    growth: true,            // plants grow and age over time
+    timeSpeed: 1.0,          // biological clock multiplier
+    aging: true,             // false: plants reach their prime and stay there
+    flowerCycles: true,      // false: flowers stay in bloom (no wilting, no seed heads)
+    reproduction: true,      // spent flowers seed new plants; false: plants regrow in place
+    immigration: true,       // occasional wind-blown seeds of new species
+    variation: true,         // false: every plant is its species' canonical individual
+    genome: null,            // default genome traits for new plants, e.g. { hue: 0.4 }
+    seed: 42,                // master seed: plants added without a seed derive theirs from it
+    // Interaction
+    interactive: true,       // pointer reactions, pollen trail and dandelion blowing
+    pointerMode: 'reach',    // reach | flinch | none
+    pollen: true,            // pollen trail behind the pointer
+    particles: true,         // falling petals and leaves
+    dandelionBlow: true      // click/tap a seed clock to blow its seeds
+  };
+
+  /** Named bundles of options; anything passed explicitly still wins. */
+  const PRESETS = {
+    living: {},
+    static: {
+      growth: false, flowerCycles: false, wind: 0, gusts: false, particles: false, pollen: false,
+      interactive: false, reproduction: false, immigration: false
+    },
+    calm: { wind: 0.2, gusts: false, particles: false, pollen: false, reproduction: false, immigration: false, timeSpeed: 0.5 },
+    classic: { rotation: false, glow: false },
+    minimal: { grass: false, soil: false, background: 'transparent', particles: false, pollen: false }
+  };
+
+  function normalizeGardenOptions(options = {}) {
+    const out = {};
+    // Legacy names
+    if (options.bloom !== undefined && options.glow === undefined) out.glow = options.bloom !== false;
+    if (options.lifecycle !== undefined && options.reproduction === undefined) out.reproduction = options.lifecycle !== 'respawn';
+    for (const key in options) {
+      if (options[key] !== undefined && Object.prototype.hasOwnProperty.call(GARDEN_DEFAULTS, key)) out[key] = options[key];
+    }
+    if (out.wind === false) out.wind = 0;
+    if (out.wind === true) out.wind = GARDEN_DEFAULTS.wind;
+    return out;
+  }
+
+  function resolveGardenOptions(options = {}) {
+    const preset = (options.preset && PRESETS[options.preset]) || {};
+    return Object.assign({}, GARDEN_DEFAULTS, preset, normalizeGardenOptions(options));
+  }
+
+  const GARDEN_EVENTS = { germinate: 'onSeedGerminate', death: 'onPlantDeath', reseed: 'onPlantReseed', blow: 'onDandelionBlow' };
+
   class AsciiGarden {
     constructor(canvas, options = {}) {
       this.canvas = typeof canvas === 'string' && typeof document !== 'undefined' ? document.querySelector(canvas) : canvas;
       this.ctx = this.canvas && typeof this.canvas.getContext === 'function' ? this.canvas.getContext('2d') : null;
       this.plants = [];
-      this.windStrength = options.wind !== undefined ? options.wind : 0.6;
       this.windTime = 0;
       this.wind = new WindField(options.windSeed || 7);
       this.particles = []; // Floating pollen, seeds, petals, sunlight motes
       this.isRunning = false;
-      this.paletteName = options.palette || 'botanical';
       this.pointer = { x: -999, y: -999, active: false };
       this.renderer = options.renderer || GlyphRenderer.shared;
       this.bloomPass = new BloomPass();
-      this.bloom = options.bloom !== false;
+      this._events = {};
+      this._planted = 0;
 
-      // Lifecycle model:
-      //  'reproduce' (default) — flowers set seed, seeds drift and germinate in new spots,
-      //                          dead plants are removed: a self-sustaining population.
-      //  'respawn'             — a dead plant is reborn in place (single-specimen embeds).
-      this.lifecycle = options.lifecycle || 'reproduce';
+      // Every feature switch (see GARDEN_DEFAULTS); applied to the fields below.
+      // Lifecycle model (from `reproduction`):
+      //  'reproduce' — flowers set seed, seeds drift and germinate in new spots,
+      //                dead plants are removed: a self-sustaining population.
+      //  'respawn'   — a dead plant is reborn in place (single-specimen embeds).
+      this.options = resolveGardenOptions(options);
       this.seedGermination = options.seedGermination !== undefined ? options.seedGermination : 0.12;
       this.minSpacing = options.minSpacing !== undefined ? options.minSpacing : 28;
       this.maxPlants = options.maxPlants || null;   // default derived from width
       this.minPlants = options.minPlants !== undefined ? options.minPlants : null;
       this.maxSpeciesShare = options.maxSpeciesShare !== undefined ? options.maxSpeciesShare : 0.3;
-      // Seeds of random species occasionally blow in from outside the meadow (diversity)
-      this.immigration = options.immigration !== false;
       this._immigrationTimer = 20 + Math.random() * 20;
 
-      this.reducedMotion = options.reducedMotion !== undefined
-        ? !!options.reducedMotion
-        : (typeof window !== 'undefined' && typeof window.matchMedia === 'function' &&
-          window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-
-      // Time control engine
-      this.timeSpeed = options.timeSpeed !== undefined ? options.timeSpeed : 1.0; // 0 = paused, 1 = normal, 3 = fast
+      // Legacy single-callback hooks (garden.on(...) is the event API)
       this.onDandelionBlow = null;
       this.onSeedGerminate = null;
       this.onPlantDeath = null;
       this.onPlantReseed = null;
 
-      // Living Meadow Grass along the soil line
       this.grass = [];
-      this.enableGrass = options.grass !== false;
+      this._applyOptions();
 
       this._listeners = [];
       this._setupEvents();
+      this._observeVisibility();
       this.resize();
     }
 
+    /** Push option values into the engine fields they control. */
+    _applyOptions() {
+      const o = this.options;
+      this.windStrength = Math.max(0, +o.wind || 0);
+      this.paletteName = PALETTES[o.palette] ? o.palette : 'botanical';
+      this.bloom = !!o.glow;
+      this.lifecycle = o.reproduction ? 'reproduce' : 'respawn';
+      this.immigration = !!(o.immigration && o.reproduction);
+      this.timeSpeed = Math.max(0, +o.timeSpeed || 0);
+      this.enableGrass = !!o.grass;
+      this.reducedMotion = (o.reducedMotion !== null && o.reducedMotion !== undefined)
+        ? !!o.reducedMotion
+        : (typeof window !== 'undefined' && typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      this.plants.forEach(({ plant }) => this._applyPlantFeatures(plant));
+    }
+
+    _applyPlantFeatures(plant) {
+      plant.simulator.memberCycles = this.options.flowerCycles && plant.flowerCycles !== false;
+      plant.setPalette(this.paletteName);
+    }
+
+    /**
+     * Change any options at runtime, e.g. garden.set({ wind: 0, glow: false }) or
+     * garden.set({ preset: 'static' }). Returns the garden for chaining.
+     */
+    set(partial = {}) {
+      const prev = this.options;
+      const preset = (partial.preset && PRESETS[partial.preset]) || {};
+      this.options = Object.assign({}, prev, preset, normalizeGardenOptions(partial));
+      this._applyOptions();
+      if (prev.grass !== this.options.grass || prev.soil !== this.options.soil ||
+        prev.groundOffset !== this.options.groundOffset || prev.palette !== this.options.palette) {
+        this.resize();
+      }
+      if (!this.isRunning) this.render();
+      return this;
+    }
+
+    setOptions(partial) {
+      return this.set(partial);
+    }
+
+    /** Subscribe to garden events: 'germinate', 'death', 'reseed', 'blow'. */
+    on(name, fn) {
+      (this._events[name] = this._events[name] || []).push(fn);
+      return this;
+    }
+
+    off(name, fn) {
+      if (this._events[name]) this._events[name] = fn ? this._events[name].filter(f => f !== fn) : [];
+      return this;
+    }
+
+    _emit(name, ...args) {
+      const legacy = GARDEN_EVENTS[name] && this[GARDEN_EVENTS[name]];
+      if (typeof legacy === 'function') legacy.apply(this, args);
+      (this._events[name] || []).forEach(fn => fn.apply(this, args));
+    }
+
+    _observeVisibility() {
+      this._offscreen = false;
+      if (!this.options.pauseOffscreen || typeof IntersectionObserver === 'undefined' ||
+        !this.canvas || typeof Element === 'undefined' || !(this.canvas instanceof Element)) return;
+      this._visibilityObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => { this._offscreen = !entry.isIntersecting; });
+      });
+      this._visibilityObserver.observe(this.canvas);
+    }
+
     get groundY() {
-      return (this.cssHeight || 600) - 50;
+      return (this.cssHeight || 600) - (this.options ? this.options.groundOffset : 50);
     }
 
     get capacity() {
@@ -3369,11 +3558,20 @@
       if (this.ctx && typeof this.ctx.setTransform === 'function') this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       else if (this.ctx && typeof this.ctx.scale === 'function') this.ctx.scale(dpr, dpr);
 
+      // Plants placed by fraction (0..1) keep their relative position when resized
+      this.plants.forEach(entry => {
+        if (entry.fx !== null && entry.fx !== undefined) entry.x = entry.fx * this.cssWidth;
+      });
+
       this._soilGlyphs = [];
-      for (let gx = 0; gx < this.cssWidth; gx += 16) {
-        this._soilGlyphs.push({ x: gx, y: this.groundY + 12, char: '-', fg: '#225528', size: 12 });
+      if (this.options.soil) {
+        const soil = mixColor(this.getPalette().stemDark, '#000000', 0.45);
+        for (let gx = 0; gx < this.cssWidth; gx += 16) {
+          this._soilGlyphs.push({ x: gx, y: this.groundY + 12, char: '-', fg: soil, size: 12 });
+        }
       }
       this._initGrass();
+      if (this._static) this.render();
     }
 
     _initGrass() {
@@ -3408,12 +3606,13 @@
       };
 
       const updatePointer = (clientX, clientY) => {
+        if (!this.options.interactive) return;
         const p = local(clientX, clientY);
         this.pointer.x = p.x;
         this.pointer.y = p.y;
         this.pointer.active = true;
 
-        if (Math.random() < 0.25) {
+        if (this.options.pollen && Math.random() < 0.25) {
           this.particles.push({
             x: this.pointer.x + (Math.random() - 0.5) * 20,
             y: this.pointer.y + (Math.random() - 0.5) * 20,
@@ -3439,7 +3638,7 @@
           const t = e.touches[0];
           updatePointer(t.clientX, t.clientY);
           const p = local(t.clientX, t.clientY);
-          this.checkDandelionBlow(p.x, p.y);
+          if (this.options.interactive && this.options.dandelionBlow) this.checkDandelionBlow(p.x, p.y);
         }
       }, { passive: true });
 
@@ -3456,7 +3655,7 @@
       // Click to blow dandelion seeds if clicking near a dandelion head!
       this._listen(this.canvas, 'click', e => {
         const p = local(e.clientX, e.clientY);
-        this.checkDandelionBlow(p.x, p.y);
+        if (this.options.interactive && this.options.dandelionBlow) this.checkDandelionBlow(p.x, p.y);
       });
 
       if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
@@ -3469,6 +3668,7 @@
       this.stop();
       this._listeners.forEach(([t, type, fn, opts]) => t.removeEventListener(type, fn, opts));
       this._listeners = [];
+      if (this._visibilityObserver) this._visibilityObserver.disconnect();
     }
 
     /**
@@ -3518,9 +3718,7 @@
         });
       }
 
-      if (typeof this.onDandelionBlow === 'function') {
-        this.onDandelionBlow(plant, originX, originY);
-      }
+      this._emit('blow', plant, originX, originY);
     }
 
     /**
@@ -3594,16 +3792,48 @@
         genome: parent ? parent.genome.mutate(seed) : undefined,
         curvature: parent ? parent.curvature * 0.5 + (Math.random() - 0.5) * 0.3 : 0
       });
-      if (typeof this.onSeedGerminate === 'function') this.onSeedGerminate(seedling, x);
+      this._emit('germinate', seedling, x);
       return seedling;
     }
 
+    /**
+     * Add a plant. x is in CSS pixels, or a fraction of the width (0 < x < 1, or '40%')
+     * that follows resizes. Also accepts a single object: addPlant({ type, x, ... }).
+     */
     addPlant(x, plantOptions = {}) {
-      const plant = new AsciiPlant({
-        ...plantOptions,
+      if (x !== null && typeof x === 'object') {
+        plantOptions = x;
+        x = plantOptions.x;
+      }
+      const o = this.options;
+      let fx = null;
+      if (x === undefined || x === null) fx = 0.5;
+      else if (typeof x === 'string' && x.trim().endsWith('%')) fx = parseFloat(x) / 100;
+      else if (typeof x === 'number' && x > 0 && x < 1) fx = x;
+      const px = fx !== null ? fx * (this.cssWidth || 800) : +x;
+
+      const type = plantOptions.type || 'sunflower';
+      const seed = plantOptions.seed !== undefined
+        ? plantOptions.seed
+        : Math.floor(hash01(o.seed, this._planted) * 1000000);
+      this._planted++;
+      let genome = plantOptions.genome;
+      if (!(genome instanceof Genome)) {
+        const traits = Object.assign({}, o.genome || {}, genome || {});
+        if (!o.variation) genome = Genome.canonical(type, seed, traits);
+        else if (Object.keys(traits).length > 0) genome = traits;
+      }
+
+      const plant = new AsciiPlant(Object.assign({}, plantOptions, {
+        type,
+        seed,
+        genome,
+        pointerMode: plantOptions.pointerMode || o.pointerMode,
         palette: this.paletteName
-      });
-      this.plants.push({ x, plant });
+      }));
+      this._applyPlantFeatures(plant);
+      this.plants.push({ x: px, fx, plant });
+      if (this._static) this.render();
       return plant;
     }
 
@@ -3625,6 +3855,16 @@
       const loop = (now) => {
         if (!this.isRunning) return;
         const nowMs = now || (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+        const schedule = () => {
+          if (typeof requestAnimationFrame === 'function') this._raf = requestAnimationFrame(loop);
+        };
+        // Off-screen: do no work at all; frame-rate cap: skip until the next slot
+        const minFrame = this.options.fps > 0 ? 1000 / this.options.fps : 0;
+        if (this._offscreen || (minFrame && nowMs - lastTime < minFrame - 1)) {
+          if (this._offscreen) lastTime = nowMs;
+          schedule();
+          return;
+        }
         // Clamp so a backgrounded tab does not fast-forward the simulation on return
         const dt = Math.min(0.1, Math.max(0, (nowMs - lastTime) / 1000));
         lastTime = nowMs;
@@ -3650,15 +3890,19 @@
 
     update(dt) {
       this.windTime += dt;
+      const o = this.options;
       const groundY = this.groundY;
       const dead = [];
+      const growing = o.growth && this.timeSpeed > 0;
 
       this.plants.forEach(({ plant, x }) => {
         // Continuous biological lifecycle:
         // Growth (0 -> 1) -> mature prime (1 -> 21, stretched by the life factor)
         // -> senescence (21 -> 23.5) -> death
-        if (this.timeSpeed > 0) {
-          const newAge = plant.age + plant.agingDelta(dt, this.timeSpeed);
+        if (growing && plant.growth !== false) {
+          let newAge = plant.age + plant.agingDelta(dt, this.timeSpeed);
+          // aging: false -> plants reach their prime and stay there
+          if (!o.aging) newAge = Math.min(newAge, Math.max(plant.age, PRIME_END - 0.05));
 
           if (newAge >= LIFE_END) {
             dead.push({ plant, x });
@@ -3705,7 +3949,7 @@
         const isFlowerWilting = af && af.state === 'wilting';
         const hasLeafWilting = plant.simulator && plant.simulator.members && plant.simulator.members.leaves.some(l => l.state === 'wilting');
 
-        if ((isFlowerWilting || plant.age > PRIME_END) && Math.random() < 0.10) {
+        if (o.particles && (isFlowerWilting || plant.age > PRIME_END) && Math.random() < 0.10) {
           const head = plant.getHeadPosition(x, groundY);
           const pal = plant.getPalette();
           const fPal = pal.flowers[plant.type] || pal.flowers.sunflower;
@@ -3722,7 +3966,7 @@
           });
         }
 
-        if (hasLeafWilting && Math.random() < 0.04) {
+        if (o.particles && hasLeafWilting && Math.random() < 0.04) {
           this.particles.push({
             x: x + (Math.random() - 0.5) * 35,
             y: groundY - (plant.height * Math.random() * 0.6),
@@ -3743,11 +3987,11 @@
       dead.forEach(({ plant, x }) => {
         if (this.lifecycle === 'respawn') {
           plant.reseed(Math.floor(Math.random() * 1000000), { inherit: true });
-          if (typeof this.onPlantReseed === 'function') this.onPlantReseed(plant, x);
+          this._emit('reseed', plant, x);
           return;
         }
         this.removePlant(plant);
-        if (typeof this.onPlantDeath === 'function') this.onPlantDeath(plant, x);
+        this._emit('death', plant, x);
         const before = this.particles.length;
         this.releaseSeeds(plant, x, 3 + Math.round(plant.genome.flowering * 2));
         if (this.plants.length < this.floor && this.particles.length > before) {
@@ -3755,7 +3999,7 @@
         }
       });
 
-      if (this.immigration && this.lifecycle === 'reproduce' && this.timeSpeed > 0) {
+      if (this.immigration && this.lifecycle === 'reproduce' && growing) {
         this._immigrationTimer -= dt * this.timeSpeed;
         if (this._immigrationTimer <= 0) {
           this._immigrationTimer = 25 + Math.random() * 25;
@@ -3809,11 +4053,11 @@
       this.plants.forEach(({ plant }) => {
         plant.pointer.x = this.pointer.x;
         plant.pointer.y = this.pointer.y;
-        plant.pointer.active = this.pointer.active;
+        plant.pointer.active = this.pointer.active && o.interactive;
       });
 
-      // Living Meadow Grass Lifecycle update
-      if (this.enableGrass && this.grass.length > 0) {
+      // Living Meadow Grass Lifecycle update (grass stands still when growth is off)
+      if (this.enableGrass && o.growth && this.grass.length > 0) {
         this.grass.forEach(g => g.update(dt, this.timeSpeed));
       }
     }
@@ -3864,10 +4108,11 @@
 
       if (this.enableGrass && this.grass.length > 0) {
         const pal = this.getPalette();
+        const pointer = this.options.interactive ? this.pointer : null;
         for (let i = 0; i < this.grass.length; i++) {
           const tuft = this.grass[i];
-          const gust = this.wind.sample(tuft.x, this.windTime);
-          const glyphs = tuft.generateGlyphs(time, wind, this.pointer, pal, gust);
+          const gust = this.options.gusts ? this.wind.sample(tuft.x, this.windTime) : 0;
+          const glyphs = tuft.generateGlyphs(time, wind, pointer, pal, gust);
           for (let j = 0; j < glyphs.length; j++) out.push(glyphs[j]);
         }
       }
@@ -3875,7 +4120,7 @@
       const groundY = this.groundY;
       for (let i = 0; i < this.plants.length; i++) {
         const { x, plant } = this.plants[i];
-        const gust = this.wind.sample(x, this.windTime);
+        const gust = this.options.gusts ? this.wind.sample(x, this.windTime) : 0;
         const glyphs = plant.generateGlyphs(x, groundY, time, wind, gust);
         for (let j = 0; j < glyphs.length; j++) out.push(glyphs[j]);
       }
@@ -3897,13 +4142,18 @@
       const dpr = this.dpr || 1;
       if (typeof ctx.setTransform === 'function') ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      ctx.fillStyle = '#050508';
-      ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
+      const bg = this.options.background;
+      if (!bg || bg === 'transparent') {
+        if (typeof ctx.clearRect === 'function') ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
+      } else {
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
+      }
 
-      this.renderer.draw(ctx, this.collectGlyphs(), dpr);
+      this.renderer.draw(ctx, this.collectGlyphs(), dpr, { rotate: this.options.rotation });
 
       if (this.bloom && this.canvas) {
-        this.bloomPass.apply(ctx, this.canvas.width, this.canvas.height);
+        this.bloomPass.apply(ctx, this.canvas.width, this.canvas.height, this.options.glowStrength);
       }
     }
   }
@@ -4027,15 +4277,15 @@
         ? config.species.split(',').map(s => s.trim()).filter(Boolean)
         : ['sunflower', 'rose', 'tulip', 'dandelion', 'iris', 'thistle', 'hibiscus']);
 
-    const garden = new AsciiGarden(canvas, {
+    const garden = new AsciiGarden(canvas, Object.assign({}, config, {
       wind,
       palette,
       timeSpeed: effectiveSpeed,
       grass: config.grass !== false,
       // The population is defined by syncToTime(), so plants regrow in place
-      lifecycle: 'respawn',
+      reproduction: false,
       immigration: false
-    });
+    }));
 
     garden.isPersistent = true;
     garden.startTime = startTime;
@@ -4197,58 +4447,262 @@
   }
 
   // =========================================================================
-  // 11. CUSTOM WEB COMPONENTS
+  // 11. ONE-LINE INTEGRATION HELPERS
+  // =========================================================================
+
+  // Options that describe a single plant (everything else is a garden option)
+  const PLANT_KEYS = ['type', 'age', 'bloom', 'height', 'seed', 'genome', 'curvature', 'leafDensity',
+    'branching', 'pointerMode', 'growth', 'flowerCycles', 'metabolicRate'];
+
+  function pick(obj, keys) {
+    const out = {};
+    keys.forEach(k => { if (obj[k] !== undefined) out[k] = obj[k]; });
+    return out;
+  }
+
+  /** A selector, canvas or container element -> a canvas (created inside containers). */
+  function resolveCanvas(target) {
+    let el = (typeof target === 'string' && typeof document !== 'undefined') ? document.querySelector(target) : target;
+    if (!el && typeof target === 'string') throw new Error(`Florametric: no element matches "${target}"`);
+    if (el && typeof el.getContext !== 'function' && typeof document !== 'undefined') {
+      const canvas = document.createElement('canvas');
+      canvas.style.cssText = 'width:100%;height:100%;display:block;';
+      if (!el.style.height && el.clientHeight === 0) el.style.height = '360px';
+      el.appendChild(canvas);
+      el = canvas;
+    }
+    return el || null;
+  }
+
+  /** options.plants (strings or objects) or species + count -> plant specs with x fractions. */
+  function plantSpecs(options) {
+    let specs;
+    if (Array.isArray(options.plants) && options.plants.length) {
+      specs = options.plants.map(p => (typeof p === 'string' ? { type: p } : Object.assign({}, p)));
+    } else {
+      let species = options.species || SPECIES;
+      if (typeof species === 'string') species = species.split(',').map(t => t.trim()).filter(Boolean);
+      const count = options.count !== undefined ? Math.max(0, options.count | 0) : Math.min(species.length, 7);
+      specs = [];
+      for (let i = 0; i < count; i++) specs.push({ type: species[i % species.length] });
+    }
+    const shared = pick(options, ['age', 'bloom', 'height', 'curvature', 'growth', 'flowerCycles']);
+    return specs.map((spec, i) => Object.assign({}, shared, { x: (i + 0.5) / specs.length }, spec));
+  }
+
+  /**
+   * Tallest plant that fits the canvas with room for its flower head, allowing for the
+   * genome's size gene (up to ~1.3x). Helpers never let a flower be cut off at the top.
+   */
+  function fitHeight(garden) {
+    if (!garden.cssHeight) return 320;
+    return clamp((garden.cssHeight - garden.options.groundOffset - 105) / 1.3, 60, 380);
+  }
+
+  /**
+   * Plant a spec, then measure the grown plant's real top edge (the size gene and flower
+   * heads vary) and replant it smaller, same seed and genome, if any glyph would be cut off.
+   */
+  function addFitted(garden, spec) {
+    let plant = garden.addPlant(spec);
+    if (!garden.cssHeight || plant.age < 1) return plant;
+    const margin = 10;
+    const groundY = garden.groundY;
+    // Flower heads do not shrink with the stem, so a single proportional pass can fall short
+    for (let pass = 0; pass < 3 && plant.height > 40; pass++) {
+      const entry = garden.plants[garden.plants.length - 1];
+      let top = Infinity;
+      for (const g of plant.generateGlyphs(entry.x, groundY, 0, 0, 0)) top = Math.min(top, g.y - (g.size || 12) / 2);
+      if (top >= margin) break;
+      garden.removePlant(plant);
+      garden._planted--;
+      const scale = (groundY - margin) / Math.max(1, groundY - top);
+      plant = garden.addPlant(Object.assign({}, spec, {
+        seed: plant.seed, genome: plant.genome, height: Math.max(40, plant.height * scale * 0.95)
+      }));
+    }
+    return plant;
+  }
+
+  /**
+   * Florametric.garden(target, options): a garden of plants in one call.
+   *   target  - selector, <canvas>, or any container element (a canvas is created inside)
+   *   options - every garden option (GARDEN_DEFAULTS), plus
+   *             plants: ['rose', { type: 'tulip', x: 0.7, age: 1 }] or species + count,
+   *             age/bloom/height for all plants, animate: false (draw once), autoStart.
+   */
+  function createGarden(target, options = {}) {
+    const garden = new AsciiGarden(resolveCanvas(target), options);
+    const fit = fitHeight(garden);
+    plantSpecs(options).forEach(spec => {
+      spec.height = Math.min(spec.height !== undefined ? spec.height : fit, fit);
+      addFitted(garden, spec);
+    });
+    if (options.animate === false) {
+      garden._static = true;
+      garden.render();
+    } else if (options.autoStart !== false) {
+      garden.start();
+    }
+    return garden;
+  }
+
+  /** Florametric.plant(target, options): one specimen, centred; plant + garden options. */
+  function createPlant(target, options = {}) {
+    const canvas = resolveCanvas(target);
+    const garden = new AsciiGarden(canvas, Object.assign({ reproduction: false, immigration: false }, options));
+    const plant = pick(options, PLANT_KEYS);
+    if (plant.age === undefined) plant.age = 1.0;
+    const fit = fitHeight(garden);
+    plant.height = Math.min(plant.height !== undefined ? plant.height : fit, fit);
+    addFitted(garden, Object.assign({ x: 0.5 }, plant));
+    if (options.animate === false) {
+      garden._static = true;
+      garden.render();
+    } else if (options.autoStart !== false) {
+      garden.start();
+    }
+    return garden;
+  }
+
+  /** Florametric.render(target, options): draw once with the static preset (no CPU after). */
+  function renderStatic(target, options = {}) {
+    const many = options.plants || options.species || options.count !== undefined;
+    const opts = Object.assign({ preset: 'static' }, options, { animate: false });
+    return many ? createGarden(target, opts) : createPlant(target, opts);
+  }
+
+  // HTML attribute -> option type. Booleans accept "", true/false, 1/0, yes/no, on/off.
+  const ATTRIBUTE_TYPES = {
+    palette: 'str', background: 'str', glow: 'bool', 'glow-strength': 'num', rotation: 'bool',
+    grass: 'bool', soil: 'bool', 'ground-offset': 'num', wind: 'num', gusts: 'bool',
+    'reduced-motion': 'bool', fps: 'num', 'pause-offscreen': 'bool', growth: 'bool',
+    'time-speed': 'num', aging: 'bool', 'flower-cycles': 'bool', reproduction: 'bool',
+    immigration: 'bool', variation: 'bool', genome: 'json', interactive: 'bool',
+    'pointer-mode': 'str', pollen: 'bool', particles: 'bool', 'dandelion-blow': 'bool',
+    preset: 'str', animate: 'bool',
+    type: 'str', age: 'num', bloom: 'num', height: 'num', seed: 'num', curvature: 'num',
+    species: 'list', count: 'num', plants: 'list'
+  };
+
+  function parseAttributeValue(kind, raw) {
+    if (raw === null || raw === undefined) return undefined;
+    const v = String(raw).trim();
+    switch (kind) {
+      case 'bool': return !/^(false|0|no|off)$/i.test(v);
+      case 'num': {
+        if (/^(false|off|none)$/i.test(v)) return 0;
+        const n = parseFloat(v);
+        return isNaN(n) ? undefined : n;
+      }
+      case 'list': return v.split(',').map(t => t.trim()).filter(Boolean);
+      case 'json': try { return JSON.parse(v); } catch (e) { return undefined; }
+      default: return v;
+    }
+  }
+
+  /** Read options from an element's attributes, or from a plain { 'kebab-name': value } object. */
+  function optionsFromAttributes(source) {
+    const out = {};
+    const read = (name, value) => {
+      const kind = ATTRIBUTE_TYPES[name];
+      if (!kind) return;
+      const parsed = parseAttributeValue(kind, value);
+      if (parsed !== undefined) out[name.replace(/-([a-z])/g, (m, c) => c.toUpperCase())] = parsed;
+    };
+    if (source && typeof source.getAttributeNames === 'function') {
+      source.getAttributeNames().forEach(n => read(n, source.getAttribute(n)));
+    } else if (source) {
+      Object.keys(source).forEach(n => read(n, source[n]));
+    }
+    return out;
+  }
+
+  // =========================================================================
+  // 12. CUSTOM WEB COMPONENTS
   // =========================================================================
 
   if (typeof customElements !== 'undefined') {
-    class FlorametricPlantElement extends HTMLElement {
+    // Attributes that change what is planted rebuild the element; the rest toggle live
+    const STRUCTURAL_ATTRS = ['type', 'age', 'bloom', 'height', 'seed', 'curvature', 'genome', 'species',
+      'count', 'plants', 'start-time', 'epoch', 'speed', 'timescale', 'plant-count', 'config', 'variation', 'preset', 'animate'];
+
+    class FlorametricElementBase extends HTMLElement {
+      static get observedAttributes() {
+        return Object.keys(ATTRIBUTE_TYPES).concat(['start-time', 'epoch', 'speed', 'timescale', 'plant-count', 'config']);
+      }
       connectedCallback() {
-        const type = this.getAttribute('type') || 'sunflower';
-        const age = parseFloat(this.getAttribute('age') || '1.0');
-        const bloom = this.hasAttribute('bloom') ? parseFloat(this.getAttribute('bloom')) : null;
-        const height = parseInt(this.getAttribute('height') || '300', 10);
-        const palette = this.getAttribute('palette') || 'botanical';
-        const interactive = this.getAttribute('interactive') !== 'false';
-        const curvature = this.hasAttribute('curvature') ? parseFloat(this.getAttribute('curvature')) : 0;
-        const seed = this.hasAttribute('seed') ? parseInt(this.getAttribute('seed'), 10) : undefined;
-
-        this.style.display = 'inline-block';
-        this.style.background = '#050508';
-        this.style.width = this.style.width || '280px';
-        this.style.height = this.style.height || `${height + 80}px`;
-
-        const canvas = document.createElement('canvas');
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-        canvas.style.display = 'block';
-        // ASCII art is decorative to screen readers; describe it once instead
-        canvas.setAttribute('role', 'img');
-        canvas.setAttribute('aria-label', this.getAttribute('aria-label') || `Animated ASCII ${type} plant`);
-        this.appendChild(canvas);
-
-        // A single embedded specimen is reborn in place instead of seeding elsewhere
-        const garden = new AsciiGarden(canvas, { palette, lifecycle: 'respawn' });
-        garden.addPlant(canvas.clientWidth / 2 || 140, {
-          type, age, bloom, height, palette, interactive, curvature, seed
-        });
-        this._garden = garden;
-
-        // Only animate while visible on screen
-        if (typeof IntersectionObserver !== 'undefined') {
-          this._observer = new IntersectionObserver(entries => {
-            entries.forEach(entry => {
-              if (entry.isIntersecting) garden.start();
-              else garden.stop();
-            });
-          });
-          this._observer.observe(this);
-        } else {
-          garden.start();
-        }
+        if (!this._garden) this._mount();
       }
       disconnectedCallback() {
-        if (this._observer) this._observer.disconnect();
+        this._unmount();
+      }
+      attributeChangedCallback(name, oldValue, newValue) {
+        if (!this._garden || oldValue === newValue) return;
+        if (STRUCTURAL_ATTRS.includes(name)) {
+          this._unmount();
+          this._mount();
+          return;
+        }
+        const camel = name.replace(/-([a-z])/g, (m, c) => c.toUpperCase());
+        const change = newValue === null
+          ? { [camel]: GARDEN_DEFAULTS[camel] }
+          : optionsFromAttributes({ [name]: newValue });
+        this._garden.set(change);
+        if (name === 'background') this._applyHostStyle(optionsFromAttributes(this));
+      }
+      /** The underlying AsciiGarden, for full JavaScript control. */
+      get garden() {
+        return this._garden || null;
+      }
+      set(options) {
+        if (this._garden) this._garden.set(options);
+        return this;
+      }
+      _canvas(label) {
+        const canvas = document.createElement('canvas');
+        canvas.style.cssText = 'width:100%;height:100%;display:block;';
+        // ASCII art is decorative to screen readers; describe it once instead
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', this.getAttribute('aria-label') || label);
+        this.appendChild(canvas);
+        return canvas;
+      }
+      _applyHostStyle(opts) {
+        const bg = opts.background || GARDEN_DEFAULTS.background;
+        this.style.background = bg === 'transparent' ? 'transparent' : bg;
+      }
+      _unmount() {
         if (this._garden) this._garden.destroy();
+        this._garden = null;
+        this.innerHTML = '';
+      }
+    }
+
+    /** <florametric-plant type="rose" ...>: one specimen; every option is an attribute. */
+    class FlorametricPlantElement extends FlorametricElementBase {
+      _mount() {
+        const opts = optionsFromAttributes(this);
+        const height = opts.height || 300;
+        if (this.style.display === '' ) this.style.display = 'inline-block';
+        this.style.width = this.style.width || '280px';
+        this.style.height = this.style.height || `${height + 80}px`;
+        this._applyHostStyle(opts);
+        const canvas = this._canvas(`Animated ASCII ${opts.type || 'sunflower'} plant`);
+        this._garden = createPlant(canvas, opts);
+      }
+    }
+
+    /** <florametric-garden species="rose,tulip" count="6" ...>: a row of plants. */
+    class FlorametricGardenElement extends FlorametricElementBase {
+      _mount() {
+        const opts = optionsFromAttributes(this);
+        if (this.style.display === '') this.style.display = 'block';
+        this.style.width = this.style.width || '100%';
+        this.style.height = this.style.height || '360px';
+        this._applyHostStyle(opts);
+        const canvas = this._canvas('Animated ASCII flower garden');
+        this._garden = createGarden(canvas, opts);
       }
     }
 
@@ -4259,12 +4713,14 @@
       class AsciiPlantElement extends FlorametricPlantElement { }
       customElements.define('ascii-plant', AsciiPlantElement);
     }
-
+    if (!customElements.get('florametric-garden')) {
+      customElements.define('florametric-garden', FlorametricGardenElement);
+    }
     /**
      * <florametric-meadow>: Drop-in Time-Anchored Persistent Garden Element
      */
-    class FlorametricMeadowElement extends HTMLElement {
-      connectedCallback() {
+    class FlorametricMeadowElement extends FlorametricElementBase {
+      _mount() {
         const startTimeAttr = this.getAttribute('start-time') || this.getAttribute('epoch');
         const startTime = startTimeAttr
           ? (isNaN(Number(startTimeAttr)) ? new Date(startTimeAttr).getTime() : Number(startTimeAttr))
@@ -4279,20 +4735,18 @@
         const seed = parseInt(this.getAttribute('seed') || '42', 10);
         const configAttr = this.getAttribute('config');
 
-        this.style.display = 'block';
-        this.style.background = '#050508';
+        const features = optionsFromAttributes(this);
+        if (this.style.display === '') this.style.display = 'block';
         this.style.width = this.style.width || '100%';
         this.style.height = this.style.height || '360px';
         this.style.position = 'relative';
         this.style.overflow = 'hidden';
+        this._applyHostStyle(features);
 
-        const canvas = document.createElement('canvas');
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-        canvas.style.display = 'block';
-        this.appendChild(canvas);
+        const canvas = this._canvas('Time-anchored ASCII flower meadow');
 
         const meadowGarden = createPersistentMeadow(canvas, {
+          ...features,
           startTime,
           speed,
           plantCount,
@@ -4304,10 +4758,6 @@
           config: configAttr
         });
         this._garden = meadowGarden;
-      }
-
-      disconnectedCallback() {
-        if (this._garden) this._garden.destroy();
       }
 
       fastForward(targetTimestamp) {
@@ -4351,6 +4801,14 @@
     TRAIT_RANGES,
     BOTANY,
     SPECIES,
+    // One-line integration
+    garden: createGarden,
+    plant: createPlant,
+    render: renderStatic,
+    presets: PRESETS,
+    defaults: GARDEN_DEFAULTS,
+    optionsFromAttributes,
+    version: '2.0.0',
     generateString: (options) => {
       const plant = new AsciiPlant(options);
       return plant.toPlainText(options.cols || 40, options.rows || 35);

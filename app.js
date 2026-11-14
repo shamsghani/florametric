@@ -757,8 +757,76 @@ document.addEventListener('DOMContentLoaded', () => {
     palette: 'botanical',
     seed: 42,
     timeShiftMs: 0,
-    format: 'webcomponent' // 'webcomponent' | 'vanilla' | 'url'
+    format: 'webcomponent', // 'webcomponent' | 'vanilla' | 'npm' | 'url'
+    kind: 'meadow',         // 'plant' | 'garden' | 'meadow'
+    preset: '',
+    features: {}            // only the switches the user changed
   };
+
+  // Feature switches shown in the builder (every one is also an attribute & option)
+  const FEATURE_CONTROLS = [
+    { key: 'growth', label: 'Growth' },
+    { key: 'flowerCycles', label: 'Flowers wilt & seed' },
+    { key: 'aging', label: 'Aging' },
+    { key: 'reproduction', label: 'Reseeding', kinds: ['garden'] },
+    { key: 'glow', label: 'Glow' },
+    { key: 'rotation', label: 'Rotated glyphs' },
+    { key: 'grass', label: 'Grass' },
+    { key: 'soil', label: 'Soil line' },
+    { key: 'gusts', label: 'Wind gusts' },
+    { key: 'interactive', label: 'Pointer interaction' },
+    { key: 'particles', label: 'Falling petals' },
+    { key: 'variation', label: 'Genetic variation' },
+    { key: 'background', label: 'Transparent background', kind: 'transparent' },
+    { key: 'wind', label: 'Wind', kind: 'range' }
+  ];
+
+  const KIND_HINTS = {
+    plant: 'One specimen in its own box: product cards, sidebars, headers.',
+    garden: 'A row of plants that grows, blooms and reseeds while the page is open.',
+    meadow: 'Anchored to a start time: every visitor sees the same meadow, further along each day.'
+  };
+
+  // Options reference rows: [JS option, attribute, description] (defaults read from the library)
+  const OPTION_DOCS = [
+    ['Look'],
+    ['palette', 'palette', 'botanical, phosphor, amber, cyberpunk or monochrome'],
+    ['background', 'background', 'Any CSS colour, or transparent'],
+    ['glow', 'glow', 'Soft bloom glow around the glyphs'],
+    ['glowStrength', 'glow-strength', 'Glow intensity'],
+    ['rotation', 'rotation', 'Glyphs follow curves; false = classic upright ASCII'],
+    ['grass', 'grass', 'Living grass along the soil'],
+    ['soil', 'soil', 'The dashed soil line'],
+    ['groundOffset', 'ground-offset', 'Pixels from the bottom edge to the soil line'],
+    ['Motion'],
+    ['wind', 'wind', 'Breeze strength; 0 = still air'],
+    ['gusts', 'gusts', 'Gust fronts rolling across the plants'],
+    ['reducedMotion', 'reduced-motion', 'Gentle motion; unset = follow the visitor\'s system setting'],
+    ['fps', 'fps', 'Frame-rate cap; 0 = display refresh rate'],
+    ['pauseOffscreen', 'pause-offscreen', 'Stop drawing while scrolled out of view'],
+    ['Life'],
+    ['growth', 'growth', 'Plants grow and age over time'],
+    ['timeSpeed', 'time-speed', 'Speed of the biological clock'],
+    ['aging', 'aging', 'false = plants reach their prime and stay there'],
+    ['flowerCycles', 'flower-cycles', 'false = flowers stay in bloom (no wilting or seed heads)'],
+    ['reproduction', 'reproduction', 'Spent flowers seed new plants; false = regrow in place'],
+    ['immigration', 'immigration', 'Occasional wind-blown seeds of new species'],
+    ['variation', 'variation', 'false = every plant is its species\' textbook individual'],
+    ['genome', 'genome', 'Default genes for new plants, e.g. {"hue": 0.4}'],
+    ['seed', 'seed', 'Master seed: same seed, same plants'],
+    ['Interaction'],
+    ['interactive', 'interactive', 'Pointer bending, pollen and dandelion blowing'],
+    ['pointerMode', 'pointer-mode', 'reach (bend toward), flinch (away) or none'],
+    ['pollen', 'pollen', 'Pollen trail behind the pointer'],
+    ['particles', 'particles', 'Falling petals and leaves'],
+    ['dandelionBlow', 'dandelion-blow', 'Click a seed clock to blow its seeds'],
+    ['Content'],
+    ['preset', 'preset', 'static, calm, classic, minimal or living (applied first)', '—'],
+    ['type', 'type', 'Plant species (florametric-plant)', 'sunflower'],
+    ['species / count', 'species / count', 'Species list and number of plants (florametric-garden)', 'all / up to 7'],
+    ['age / bloom', 'age / bloom', 'Biological age (0-1 grows, 1-21 prime) and bloom override', '1 / auto'],
+    ['animate', 'animate', 'false = draw a single still frame', 'true']
+  ];
 
   let architectPreviewGarden = null;
   let architectInitialized = false;
@@ -805,105 +873,149 @@ document.addEventListener('DOMContentLoaded', () => {
     updateArchitectPreview();
   }
 
+  function architectOptions() {
+    const o = { palette: architectState.palette, seed: architectState.seed };
+    if (architectState.preset) o.preset = architectState.preset;
+    return Object.assign(o, architectState.features);
+  }
+
   function updateArchitectPreview() {
     const previewCanvas = document.getElementById('gen-preview-canvas');
     if (!previewCanvas) return;
 
-    const rect = previewCanvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    previewCanvas.width = (rect.width || 420) * dpr;
-    previewCanvas.height = (rect.height || 260) * dpr;
-    const ctx = previewCanvas.getContext('2d');
-    if (ctx) ctx.scale(dpr, dpr);
-    previewCanvas.cssWidth = rect.width || 420;
-    previewCanvas.cssHeight = rect.height || 260;
+    // Rebuild the preview for the current kind and options (cheap, and always exact)
+    if (architectPreviewGarden) architectPreviewGarden.destroy();
+    const kind = architectState.kind;
+    const opts = architectOptions();
+    const targetTime = Date.now() + architectState.timeShiftMs;
 
-    const targetTime = architectState.startTime + (Date.now() - architectState.startTime) + architectState.timeShiftMs;
-
-    if (!architectPreviewGarden) {
-      architectPreviewGarden = Florametric.createPersistentMeadow(previewCanvas, {
+    if (kind === 'meadow') {
+      architectPreviewGarden = Florametric.createPersistentMeadow(previewCanvas, Object.assign({
         startTime: architectState.startTime,
         speed: architectState.speed,
         plantCount: architectState.plantCount,
-        species: architectState.species,
-        palette: architectState.palette,
-        seed: architectState.seed,
-        wind: 0.65
-      });
-    } else {
-      architectPreviewGarden.startTime = architectState.startTime;
-      architectPreviewGarden.effectiveSpeed = Florametric.parseTimeSpeed(architectState.speed);
-      architectPreviewGarden.masterSeed = architectState.seed;
-      architectPreviewGarden.paletteName = architectState.palette;
+        species: architectState.species
+      }, opts));
       architectPreviewGarden.syncToTime(targetTime);
+    } else if (kind === 'garden') {
+      architectPreviewGarden = Florametric.garden(previewCanvas, Object.assign({
+        species: architectState.species, count: architectState.plantCount, age: 3
+      }, opts));
+    } else {
+      architectPreviewGarden = Florametric.plant(previewCanvas, Object.assign({
+        type: architectState.species[0], age: 3
+      }, opts));
     }
 
     // Stats
-    const summary = architectPreviewGarden.getMeadowSummary(targetTime);
     const statElapsed = document.getElementById('gen-stat-elapsed');
-    if (statElapsed) statElapsed.textContent = `Elapsed: ${summary.elapsedHours} hrs (${summary.elapsedDays} days)`;
-
     const statStage = document.getElementById('gen-stat-stage');
-    if (statStage) statStage.textContent = `Stage: ${summary.stage}`;
-
     const statAvgAge = document.getElementById('gen-stat-avg-age');
-    if (statAvgAge) statAvgAge.textContent = `Avg Age: ${summary.averageAge}`;
+    if (kind === 'meadow') {
+      const summary = architectPreviewGarden.getMeadowSummary(targetTime);
+      if (statElapsed) statElapsed.textContent = `Elapsed: ${summary.elapsedHours} hrs (${summary.elapsedDays} days)`;
+      if (statStage) statStage.textContent = `Stage: ${summary.stage}`;
+      if (statAvgAge) statAvgAge.textContent = `Avg Age: ${summary.averageAge}`;
+    } else {
+      const n = architectPreviewGarden.plants.length;
+      const eff = effectiveFeatures();
+      if (statElapsed) statElapsed.textContent = `${n} plant${n === 1 ? '' : 's'}`;
+      if (statStage) statStage.textContent = eff.growth ? 'Living: grows & blooms' : 'Static: no growth';
+      if (statAvgAge) statAvgAge.textContent = eff.wind > 0 ? `Wind ${(+eff.wind).toFixed(2)}` : 'Still air';
+    }
 
     updateCodeSnippetOutput();
   }
+
+  function scriptBaseUrl() {
+    const host = window.location.hostname;
+    if (!host || host === 'localhost' || host === '127.0.0.1') return 'https://shamsghani.github.io/florametric';
+    const path = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/+$/, '');
+    return `${window.location.origin}${path}`;
+  }
+
+  /** Options that differ from the library defaults, in insertion order (preset first). */
+  function changedOptions() {
+    const out = {};
+    if (architectState.preset) out.preset = architectState.preset;
+    const base = Object.assign({}, Florametric.defaults, architectState.preset ? Florametric.presets[architectState.preset] : {});
+    Object.keys(architectState.features).forEach(k => {
+      if (architectState.features[k] !== base[k]) out[k] = architectState.features[k];
+    });
+    return out;
+  }
+
+  const kebab = k => k.replace(/[A-Z]/g, c => '-' + c.toLowerCase());
 
   function updateCodeSnippetOutput() {
     const codeEl = document.getElementById('gen-code-output');
     if (!codeEl) return;
 
+    const kind = architectState.kind;
+    const baseUrl = scriptBaseUrl();
+    const changed = changedOptions();
     const spString = architectState.species.join(',');
-    const origin = window.location.origin || 'https://shamsghani.github.io';
-    const path = window.location.pathname.replace(/\/index\.html$/, '') || '/florametric';
-    const baseUrl = `${origin}${path}`.replace(/\/+$/, '');
+    const attrs = Object.keys(changed).map(k => `  ${kebab(k)}="${changed[k]}"`);
+    const jsOpts = Object.keys(changed).map(k => `  ${k}: ${JSON.stringify(changed[k])},`);
+    const js = (lines) => lines.concat(jsOpts).join('\n').replace(/,$/, '');
+    const species = `[${architectState.species.map(sp => `'${sp}'`).join(', ')}]`;
 
-    const configToken = Florametric.encodeMeadowConfig({
-      startTime: architectState.startTime,
-      speed: architectState.speed,
-      plantCount: architectState.plantCount,
-      species: architectState.species,
-      palette: architectState.palette,
-      seed: architectState.seed
-    });
+    let tag;
+    let call;
+    if (kind === 'plant') {
+      tag = ['<florametric-plant', `  type="${architectState.species[0]}"`, `  palette="${architectState.palette}"`, `  seed="${architectState.seed}"`]
+        .concat(attrs, ['  style="width: 280px; height: 380px;">', '</florametric-plant>']);
+      call = `Florametric.plant('#flower', {\n${js([`  type: '${architectState.species[0]}',`, `  palette: '${architectState.palette}',`, `  seed: ${architectState.seed},`])}\n});`;
+    } else if (kind === 'garden') {
+      tag = ['<florametric-garden', `  species="${spString}"`, `  count="${architectState.plantCount}"`, `  palette="${architectState.palette}"`, `  seed="${architectState.seed}"`]
+        .concat(attrs, ['  style="height: 360px;">', '</florametric-garden>']);
+      call = `Florametric.garden('#garden', {\n${js([`  species: ${species},`, `  count: ${architectState.plantCount},`, `  palette: '${architectState.palette}',`, `  seed: ${architectState.seed},`])}\n});`;
+    } else {
+      tag = ['<florametric-meadow', `  start-time="${architectState.startTime}"`, `  speed="${architectState.speed}"`, `  plant-count="${architectState.plantCount}"`,
+        `  species="${spString}"`, `  palette="${architectState.palette}"`, `  seed="${architectState.seed}"`]
+        .concat(attrs, ['  style="height: 380px;">', '</florametric-meadow>']);
+      call = `Florametric.createPersistentMeadow('#meadow', {\n${js([`  startTime: ${architectState.startTime}, // ${new Date(architectState.startTime).toISOString()}`, `  speed: '${architectState.speed}',`, `  plantCount: ${architectState.plantCount},`, `  species: ${species},`, `  palette: '${architectState.palette}',`, `  seed: ${architectState.seed},`])}\n});`;
+    }
+    const boxId = kind === 'plant' ? 'flower' : kind;
+    const boxStyle = kind === 'plant' ? 'width: 280px; height: 380px;' : 'height: 380px;';
 
     if (architectState.format === 'webcomponent') {
-      codeEl.textContent = `<!-- 1. Include Florametric Engine in your <head> or <body> -->
+      codeEl.textContent = `<!-- 1. Load Florametric once per page -->
 <script src="${baseUrl}/florametric.js"></script>
 
-<!-- 2. Drop in your Persistent Time-Anchored Meadow -->
-<florametric-meadow
-  start-time="${architectState.startTime}"
-  speed="${architectState.speed}"
-  plant-count="${architectState.plantCount}"
-  species="${spString}"
-  palette="${architectState.palette}"
-  seed="${architectState.seed}"
-  interactive>
-</florametric-meadow>`;
+<!-- 2. Place the element (size it with CSS) -->
+${tag.join('\n')}`;
     } else if (architectState.format === 'vanilla') {
-      codeEl.textContent = `<!-- Meadow Canvas Container -->
-<canvas id="ascii-meadow" style="width: 100%; height: 380px; display: block; background: #050508;"></canvas>
+      codeEl.textContent = `<!-- A box to draw in (a <canvas> or any element with a height) -->
+<div id="${boxId}" style="${boxStyle}"></div>
 
 <script src="${baseUrl}/florametric.js"></script>
 <script>
-  // Starts at ${new Date(architectState.startTime).toISOString()}, advances continuously
-  const meadow = Florametric.createPersistentMeadow('#ascii-meadow', {
-    startTime: ${architectState.startTime},
-    speed: '${architectState.speed}',
-    plantCount: ${architectState.plantCount},
-    species: [${architectState.species.map(s => `'${s}'`).join(', ')}],
-    palette: '${architectState.palette}',
-    seed: ${architectState.seed},
-    wind: 0.65
-  });
+  const garden = ${call.replace(/\n/g, '\n  ')}
+
+  // Change anything later: garden.set({ wind: 0, glow: false });
 </script>`;
+    } else if (architectState.format === 'npm') {
+      codeEl.textContent = `// 1. Install (types included)
+//    npm install github:shamsghani/florametric
+
+// 2. Import and mount into an element with a height
+import Florametric from 'florametric';
+
+const garden = ${call}
+
+// 3. Clean up when your component unmounts
+// garden.destroy();`;
     } else if (architectState.format === 'url') {
-      const shareUrl = `${baseUrl}/#meadow=${configToken}`;
-      codeEl.textContent = `${shareUrl}`;
+      const configToken = Florametric.encodeMeadowConfig({
+        startTime: architectState.startTime,
+        speed: architectState.speed,
+        plantCount: architectState.plantCount,
+        species: architectState.species,
+        palette: architectState.palette,
+        seed: architectState.seed
+      });
+      codeEl.textContent = `${baseUrl}/#meadow=${configToken}`;
     }
   }
 
@@ -1065,8 +1177,98 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
+    // What to embed
+    document.querySelectorAll('.kind-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        architectState.kind = btn.dataset.kind;
+        if (architectState.kind !== 'meadow' && architectState.format === 'url') architectState.format = 'webcomponent';
+        applyKindVisibility();
+        updateArchitectPreview();
+      });
+    });
+
+    const selPreset = document.getElementById('gen-preset');
+    if (selPreset) {
+      selPreset.addEventListener('change', e => {
+        architectState.preset = e.target.value;
+        architectState.features = {};
+        renderFeatureControls();
+        updateArchitectPreview();
+      });
+    }
+
+    renderFeatureControls();
+    renderOptionsReference();
+    applyKindVisibility();
     renderSpeciesChips();
     updateArchitectPreview();
+  }
+
+  function effectiveFeatures() {
+    const preset = architectState.preset ? Florametric.presets[architectState.preset] : {};
+    return Object.assign({}, Florametric.defaults, preset, architectState.features);
+  }
+
+  function renderFeatureControls() {
+    const host = document.getElementById('gen-features');
+    if (!host) return;
+    host.innerHTML = '';
+    const eff = effectiveFeatures();
+    FEATURE_CONTROLS.forEach(fc => {
+      if (fc.kinds && !fc.kinds.includes(architectState.kind)) return;
+      const row = document.createElement('label');
+      row.className = 'feature-toggle' + (fc.kind === 'range' ? ' wide' : '');
+      if (fc.kind === 'range') {
+        row.innerHTML = `${fc.label} <input type="range" min="0" max="1.5" step="0.05" value="${eff.wind}"> <span class="val-badge">${(+eff.wind).toFixed(2)}</span>`;
+        row.querySelector('input').addEventListener('input', e => {
+          architectState.features.wind = +e.target.value;
+          row.querySelector('.val-badge').textContent = (+e.target.value).toFixed(2);
+          updateArchitectPreview();
+        });
+      } else {
+        const checked = fc.kind === 'transparent' ? eff.background === 'transparent' : !!eff[fc.key];
+        row.innerHTML = `<input type="checkbox" ${checked ? 'checked' : ''}> ${fc.label}`;
+        row.querySelector('input').addEventListener('change', e => {
+          if (fc.kind === 'transparent') architectState.features.background = e.target.checked ? 'transparent' : Florametric.defaults.background;
+          else architectState.features[fc.key] = e.target.checked;
+          updateArchitectPreview();
+        });
+      }
+      host.appendChild(row);
+    });
+  }
+
+  function applyKindVisibility() {
+    const kind = architectState.kind;
+    document.querySelectorAll('.kind-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.kind === kind);
+      b.setAttribute('aria-checked', b.dataset.kind === kind ? 'true' : 'false');
+    });
+    document.querySelectorAll('#view-embed .only-meadow').forEach(el => { el.style.display = kind === 'meadow' ? '' : 'none'; });
+    document.querySelectorAll('#view-embed .not-plant').forEach(el => { el.style.display = kind === 'plant' ? 'none' : ''; });
+    document.querySelectorAll('.exp-tab').forEach(t => t.classList.toggle('active', t.dataset.format === architectState.format));
+    const hint = document.getElementById('gen-kind-hint');
+    if (hint) hint.textContent = KIND_HINTS[kind];
+    const title = document.getElementById('gen-preview-time-title');
+    if (title && kind !== 'meadow') title.textContent = kind === 'plant' ? 'Single plant preview' : 'Garden preview';
+    renderFeatureControls();
+  }
+
+  function renderOptionsReference() {
+    const table = document.getElementById('options-reference');
+    if (!table) return;
+    const fmt = v => (v === null || v === undefined ? 'auto' : (typeof v === 'object' ? 'none' : String(v)));
+    let html = '<thead><tr><th>Attribute</th><th>JavaScript option</th><th>Default</th><th>What it does</th></tr></thead><tbody>';
+    OPTION_DOCS.forEach(row => {
+      if (row.length === 1) {
+        html += `<tr class="group-row"><td colspan="4">${row[0]}</td></tr>`;
+        return;
+      }
+      const [opt, attr, desc, def] = row;
+      const value = def !== undefined ? def : fmt(Florametric.defaults[opt]);
+      html += `<tr><td><code>${attr}</code></td><td><code>${opt}</code></td><td>${value}</td><td>${desc}</td></tr>`;
+    });
+    table.innerHTML = html + '</tbody>';
   }
 
   // =========================================================================
@@ -1084,7 +1286,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function cycleTimeSpeed() {
     timeSpeedIndex = (timeSpeedIndex + 1) % timeSpeeds.length;
     const cur = timeSpeeds[timeSpeedIndex];
-    if (garden) garden.timeSpeed = cur.val;
+    if (garden) garden.set({ timeSpeed: cur.val });
 
     const btnClock = document.getElementById('btn-clock-toggle');
     if (btnClock) {
@@ -1133,7 +1335,7 @@ document.addEventListener('DOMContentLoaded', () => {
     windLevel = (windLevel + 1) % windLevels.length;
     const current = windLevels[windLevel];
     btnWind.querySelector('.lbl').textContent = `Breeze: ${current.name}`;
-    if (garden) garden.windStrength = current.val;
+    if (garden) garden.set({ wind: current.val });
     studioWind = current.val;
   });
 
