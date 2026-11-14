@@ -16,3 +16,6 @@ __pycache__/
 
 # Local browser-automation artifacts
 .playwright-mcp/
+
+# Vercel CLI project link
+.vercel
