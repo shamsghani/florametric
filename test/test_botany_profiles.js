@@ -168,4 +168,26 @@ console.log('  ✓ Flexible scapes bend more than stiff stalks');
   console.log('  ✓ Buds are green and colour up as they open');
 }
 
+// -------------------------------------------------------------
+// 9. No floating heads: the stem (via its flower stalk) reaches every flower head
+// -------------------------------------------------------------
+{
+  for (const sp of F.SPECIES) {
+    for (const bloom of [0.3, 1.0]) {
+      const p = new F.AsciiPlant({ type: sp, seed: 21, age: 1.0, bloom, height: 320, branching: 0 });
+      const sim = p.simulator.simulate(1.0, bloom, 0, 0);
+      const pal = p.getPalette();
+      const g = p.generateGlyphs(300, 600, 0, 0);
+      const apexY = 600 - sim.shootHeight;
+      const stem = g.filter(q => q.fg === pal.stem || q.fg === pal.stemDark);
+      const head = g.filter(q => q.y < apexY - 3 && q.fg !== pal.stem && q.fg !== pal.stemDark);
+      if (head.length === 0) continue;
+      let gap = Infinity;
+      for (const h of head) for (const st of stem) gap = Math.min(gap, Math.hypot(h.x - st.x, h.y - st.y));
+      assert(gap < 8, `${sp} (bloom ${bloom}) head floats ${gap.toFixed(1)}px away from its stem`);
+    }
+  }
+  console.log('  ✓ Every species\' flower head is joined to its stem by a flower stalk');
+}
+
 console.log('\nALL SPECIES BOTANY TESTS PASSED! 🌿');

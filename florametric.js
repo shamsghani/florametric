@@ -1742,6 +1742,7 @@
             Math.max(ownWilt, isWithering ? 0.8 : 0, smoothstep(0.1, 0.8, pData.ageing || 0)),
             tip.a * 0.5 + (pData.windLean || 0), pData.variant
           );
+          BotanicalArchitect._peduncle(glyphs, secFlower, tip.x, tip.y, tip.a, tip.x, fScale * 0.65, palette);
           glyphs.push(...secFlower);
         }
       });
@@ -1755,15 +1756,19 @@
       const tiltX = apexX + Math.sin(tilt) * 18;
       const tiltY = apexY - Math.cos(tilt) * 14;
 
+      const apexAngle = nodes[nodes.length - 1].angle || 0;
       if (pData.flowerPhase === 'seedhead') {
-        glyphs.push(...ProceduralFlowerRenderer.generateSeedHead(
+        const seedHead = ProceduralFlowerRenderer.generateSeedHead(
           pType, tiltX, tiltY, fScale, palette, pData.seedProgress, tilt * 0.5 + (pData.windLean || 0), pData.variant
-        ));
+        );
+        BotanicalArchitect._peduncle(glyphs, seedHead, apexX, apexY, apexAngle, tiltX, fScale, palette);
+        glyphs.push(...seedHead);
       } else if (pData.isBud) {
         const flowerGlyphs = ProceduralFlowerRenderer.generateGlyphs(
           pType, tiltX, tiltY, fScale, bloom, palette, time, seedsBlown, pData.flowerWilt || 0,
           tilt * 0.5 + (pData.windLean || 0), pData.variant, { clock: pData.dandelionClock }
         );
+        BotanicalArchitect._peduncle(glyphs, flowerGlyphs, apexX, apexY, apexAngle, tiltX, fScale, palette);
         glyphs.push(...flowerGlyphs);
       }
 
@@ -1938,6 +1943,36 @@
         if (fine) strokeAlong(out, [tip, { x: tip.x + Math.cos(ta) * lfL * 0.8, y: tip.y + Math.sin(ta) * lfL * 0.8 }], edge, size * 0.85);
         else drawLamina(out, tip.x, tip.y, ta, lfL * 0.9 * (0.4 + 0.6 * m), lfW * 1.1, LAMINA.ovate, { edge, serrate: lp.serrate && !wilted, size: size * 0.85 });
       }
+    }
+
+    /**
+     * Flower stalk (peduncle): continues the stem from its tip (x0, y0), leaving along the
+     * stem's tangent, and curves into the bottom of the head so no flower floats above
+     * its stem. The attachment point is the lowest head glyph near the head's axis, so
+     * it follows each species' shape, its bloom stage, nodding and wilting.
+     */
+    static _peduncle(out, head, x0, y0, lean, axisX, scale, palette) {
+      if (!head || head.length === 0) return;
+      const reach = 6 * scale + 3;
+      let target = null;
+      for (let i = 0; i < head.length; i++) {
+        const g = head[i];
+        if (Math.abs(g.x - axisX) <= reach && (!target || g.y > target.y)) target = g;
+      }
+      if (!target || target.y >= y0 - 2) return;
+      const tx = target.x;
+      const ty = target.y + 1.5;
+      const dist = Math.hypot(tx - x0, ty - y0);
+      // Quadratic Bézier: leave along the stem's direction, arrive under the head
+      const cx = x0 + Math.sin(lean) * dist * 0.5;
+      const cy = y0 - Math.cos(lean) * dist * 0.5;
+      const pts = [];
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8;
+        const u = 1 - t;
+        pts.push({ x: u * u * x0 + 2 * u * t * cx + t * t * tx, y: u * u * y0 + 2 * u * t * cy + t * t * ty });
+      }
+      strokeAlong(out, pts, palette.stem, 13, { spacing: 7 });
     }
 
     /**
