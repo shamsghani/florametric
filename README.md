@@ -66,11 +66,35 @@ Flower blooming is a gradual organic process rather than an instantaneous state 
 
 ---
 
+---
+
+### 🌿 Continuous Biological Life Cycle & Perpetual Reseeding
+Plants are not static illustrations — they live, mature, reproduce, senesce, and reseed in an eternal biological cycle:
+* **Sprout ($\tau \in [0.0, 0.25)$)**: Tender young seedling pushes through the soil.
+* **Vegetative Growth ($\tau \in [0.25, 0.55)$)**: Stems elongate, leaves unfurl from tiny nascent buds (`maturity \in [0.08, 1.0]`), and secondary shoots branch out **bilaterally from both left and right axils**.
+* **Anthesis & Peak Bloom ($\tau \in [0.55, 1.05)$)**: Bounded Fibonacci seed discs form surrounded by radiant ray petals; full photosynthetic leaf vigor.
+* **Senescence & Wilting ($\tau \in [1.05, 1.35)$)**: Post-bloom aging begins: stem bows with turgor loss, petals droop and gently shed on the wind, and leaves wilt into warm autumn hues.
+* **Decay & Reseeding ($\tau \ge 1.40$)**: The plant decays into organic soil mulch and reseeds as a fresh young sprout with new DNA variation, keeping the meadow perpetually alive and dynamic.
+* **Sunlight Revitalization**: Showering sunlight (`feed()`) on aging or wilting plants reverses senescence and revitalizes cellular vigor!
+
+---
+
+### 🌱 Living Meadow Grass (Sprout -> Grow -> Wilt -> Die)
+Tufts of meadow grass line the soil bed, each cycling through its own 4-stage biological life cycle:
+1. **Sprout**: Tender pale-green shoots emerging from soil (`.`, `'`, `|`, `/`).
+2. **Grow**: Lush chlorophyll blades swaying under breeze and cursor deflection (`|`, `/`, `\`).
+3. **Wilt**: Drooping golden-amber straw bending towards the earth (`/`, `\`, `~`).
+4. **Die**: Organic mulch stubble (`.`, `_`, `,`) returning nutrients to soil before reseeding.
+
+---
+
 ### 🧬 Deterministic DNA Seeds & Genetic Variance
 Every specimen derives its morphology from a deterministic genetic PRNG seed. DNA parameters govern:
 * **Stem Habit**: *Erect columnar, graceful weeping curve, S-curve, windswept lean, or angular zigzag*.
-* **Phyllotaxis & Internodes**: Dynamic spacing and leaf clustering.
-* **Axillary Branching**: Branch angle, elongation ratio, and secondary bud formation.
+* **Bilateral Axillary Branching**: Shoots emerge bilaterally from alternating left and right leaf axils with distinct angles and lengths.
+* **Continuous Leaf Unfurling**: Leaves emerge as nascent buds and expand smoothly as the shoot elongates (zero pop-in).
+* **Bounded Fibonacci Disc Florets**: Central sunflower seed heads are strictly confined inside radial Fermat spirals ($r \le R_{\text{disc}}$) cradled by outward-flaring ray petals.
+* **Phyllotaxis & Internodes**: Dynamic spacing and leaf clustering with size variance across photosynthetic and juvenile foliage.
 * **Head Tilt**: Phototropic angle variation ($-20^\circ$ to $+20^\circ$).
 
 ![Genetic Diversity Across DNA Seeds](assets/genetic-diversity.png)
