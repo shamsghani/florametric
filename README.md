@@ -37,6 +37,9 @@ Every plant is born with a heritable **genome** that it keeps for life. Each tra
 
 Seeds carry a **mutated copy of their parent's genome**, so lineages drift gradually over generations instead of jumping to unrelated plants.
 
+![Eight roses with different genomes: colour, size and branching vary between individuals](assets/genetic-diversity.png)
+*Eight roses, eight genomes: petal hue, size and branching differ while every plant stays recognisably a rose.*
+
 ### 🌊 Noise-Driven Growth (No Two Plants Alike)
 Seeded **simplex noise** (smooth, coherent randomness rather than `Math.random()` jitter) is applied while the plant actually grows:
 * **Growth velocity** wanders smoothly over time but never reverses, so growth stays monotonic.
@@ -46,6 +49,8 @@ Seeded **simplex noise** (smooth, coherent randomness rather than `Math.random()
 
 ### 🌿 Species Botany: Real Shoots, Real Flowers
 Every species follows a botanical profile from a [study of the real plants](docs/BOTANY.md).
+
+![All ten species in bloom: sunflower, hibiscus, iris, thistle, marigold, daffodil, rose, dandelion, tulip and Venus flytrap](assets/species-botany.png)
 * **Shoots:**
   * Rose canes zigzag at every node and carry hooked prickles.
   * Dandelion scapes are smooth, hollow and whippy in the wind.
@@ -75,6 +80,9 @@ Every species follows a botanical profile from a [study of the real plants](docs
 
 ### 🔄 ASCII Glyph Language with Rotation
 Strokes pick the ASCII character closest to their direction (`|`, `/`, `-`, `\`) and are only nudged by the small leftover angle, so curves stay smooth without losing the ASCII look. Petals and leaves are outlined in `( )` brackets and filled with per-species textures (`@ # *` hibiscus, `% & @` marigold, `{ ( %` rose, `! %` tulip). Stems weave in `%`, `#` and `:`, and flower heads nod with the stem tip.
+
+![Close-up of a sunflower, hibiscus and rose drawn in ASCII characters](assets/ascii-closeup.png)
+*Close-up: `/ | - \` ray florets and a spiral seed disc, `@ # *` hibiscus petals around a staminal column, a `{ (` rose spiral on a cane with `<>` prickles, and `( )` leaf outlines.*
 
 ### 🌱 Self-Seeding Meadow
 Plants are individuals, not loops. A flower that finishes **sets seed**, and the seeds fall and drift on the wind. Where they land, they may take root as **new plants in new spots**. A plant that reaches the end of its life **dies and is removed**. Competition keeps the meadow healthy:
@@ -111,23 +119,23 @@ Toggle **Nourish Mode ☀️** to shower golden nutrient motes onto the garden b
 
 ### ⏱️ Internal Biological Clock & Natural Time Passing
 Flowers grow continuously over time without requiring manual input. The biological engine supports variable speed time dilation:
-* `1x ⏱️ Normal`: Gentle natural growth (~50s from seedling to bloom).
-* `3x ⏩ Fast`: Accelerated botanical progression (~16s).
-* `8x 🚀 Rapid`: Rapid blooming simulation (~6s).
+* `1x ⏱️ Normal`: Natural growth (about 40 s from seed to full bloom).
+* `3x ⏩ Fast`: Accelerated progression (about 13 s).
+* `8x 🚀 Rapid`: Rapid blooming (about 5 s).
 * `⏸️ Paused`: Freeze time to inspect intricate petal geometry and physics.
 
 ---
 
-### 🌷 Continuous 4-Stage Bud-to-Bloom Anthesis
-Flower blooming is a gradual organic process rather than an instantaneous state switch:
-1. **Stage 1: Closed Calyx Capsule ($b < 0.18$)**: Tightly clamped protective green sepals `(#)` shield the apex.
-2. **Stage 2: Peeling Sepals & Emerging Cone ($0.18 \le b < 0.45$)**: Sepals peel outward (`\`, `/`) revealing an emerging petal cone.
-3. **Stage 3: Anthesis Unfurling ($0.45 \le b < 0.85$)**: Petals radiate along polar mathematical curves.
-4. **Stage 4: Full Anthesis ($b \ge 0.85$)**: Fully expanded disc florets, corona trumpets, or spherical seed globes.
+### 🌷 From Sprout to Seed Head
+Every stage is continuous, with no state switches or pop-in:
+* **Growth:** the stem elongates and leaves unfurl; they lengthen first and broaden later.
+* **Bud:** the petals are the same petals folded closed and still green. As the bud opens, the petals take on their colour.
+* **Bloom:** the flower reaches its full species form.
+* **Wilting:** outer petals fall one by one, colours fade in steps and the head droops. Only that head wilts; the rest of the plant stays green.
+* **Seed head:** a sunflower seed disc, rose hip or seed capsule drops its seeds in waves. Then the next bud forms.
+* **Old age:** the plant browns from the base up.
 
-![Botanical Growth Stages](assets/botanical-growth-stages.png)
-
----
+![One sunflower through its life: sprout, vegetative, green bud, opening, full bloom, flower wilting, seed head and old age](assets/botanical-growth-stages.png)
 
 ---
 
@@ -163,16 +171,28 @@ On top of the genome, a deterministic PRNG seed places each individual's leaves,
 * **Phyllotaxis & Internodes**: Dynamic spacing and leaf clustering with size variance across photosynthetic and juvenile foliage.
 * **Head Tilt**: Phototropic angle variation ($-20^\circ$ to $+20^\circ$).
 
-![Genetic Diversity Across DNA Seeds](assets/genetic-diversity.png)
-
 ---
 
 ### 🔬 The Parametric Lab & Species Codex
-Explore specimen genetics, test wind resistance, inspect real-time photosynthetic energy metrics, and export custom specimens. The **Biological Age** slider regrows the specimen to any age by replaying its life (`plant.growTo(age)`), so leaves, branches and flowers always match the age you pick.
+Edit a specimen's **genome** with sliders (life factor, vigor, branching, leafing, flowering, size, petal hue, noise), test wind resistance, watch live leaf and branch metrics, and export the result as plain ASCII, a `<florametric-plant>` tag or a PNG. The **Biological Age** slider regrows the specimen to any age by replaying its life (`plant.growTo(age)`), so leaves, branches and flowers always match the age you pick.
 
 | Parametric Lab | Species Codex Gallery |
 | :---: | :---: |
 | ![Parametric Lab](assets/parametric-lab.png) | ![Species Codex](assets/species-codex.png) |
+
+---
+
+### ⏳ Time-Anchored Persistent Meadows
+A meadow can be anchored to a start time (t₀) and grow in **real-world time**. Visitors who come back a day or a week later find the same plants, further along in their lives. The **Meadow Architect** tab previews the meadow at any moment (`Now`, `+12h`, `+1d`, `+3d`, `+1w`) and generates the embed code:
+
+```html
+<florametric-meadow start-time="1794689013331" speed="24h" plant-count="7"
+  species="sunflower,rose,tulip,dandelion,iris,thistle,hibiscus" seed="42"></florametric-meadow>
+```
+
+Speeds: `1h`, `24h` (bloom in a day), `3d`, `7d`, `30d` or a multiplier such as `0.1x`. In JavaScript: `Florametric.createPersistentMeadow(canvas, { startTime, speed, species, seed })`.
+
+![Meadow Architect previewing a time-anchored meadow one day after planting](assets/meadow-architect.png)
 
 ---
 
@@ -293,18 +313,18 @@ console.log(asciiArt);
 
 Florametric features 10 biologically distinct plant species, each with unique stem habit architectures and foliage guidelines:
 
-| Species | Botanical Name | Stem Architecture | Foliage Guidelines | Blossom Form |
+| Species | Botanical Name | Shoot | Foliage | Flower |
 | :--- | :--- | :--- | :--- | :--- |
-| **Sunflower** | *Helianthus annuus* | Stout fibrous column stalk | Large cordate spade leaves on long petioles | Dense disc florets with swirling flame ray petals |
-| **Hibiscus** | *Hibiscus rosa-sinensis* | Meandering woody cane | Alternating petiolate ovate leaves | 5-lobed rounded whorls with prominent curved stamen |
-| **Iris** | *Iris germanica* | Smooth scape with internode spathes | Tall upright sword-like ensiform blades from soil | Upright standards, drooping wing falls, golden signal |
-| **Thistle** | *Cirsium vulgare* | Decurrent winged spiny stem | Prickly winged margins with spiny lobed leaves | Stippled calyx cup crowned by radiating bristles |
-| **Marigold** | *Tagetes patula* | Multi-branched aromatic stalk | Feathery pinnately compound paired leaflets | Concentric pompons with ruffled margin petals |
-| **Daffodil** | *Narcissus pseudonarcissus* | Leafless scape with membranous spathe | Flat linear ribbon leaves rising from the base | 6-pointed perianth star with deep ruffled corona trumpet |
-| **Rose** | *Rosa rubiginosa* | Prickly cane with hooked thorns | Odd-pinnate serrated leaflets with stipules | Multi-tiered concentric velvety crimson whorls |
-| **Dandelion** | *Taraxacum officinale* | Smooth hollow leafless scape | Basal rosette of runcinate "lion's-tooth" leaves | Spherical fluffy pappus clock with drifting parachute seeds |
-| **Tulip** | *Tulipa gesneriana* | Upright smooth solitary scape | Broad curving glaucous sheaths clasping the stem | Scalloped architectural goblet cup with dark stamen |
-| **Venus Flytrap** | *Dionaea muscipula* | Low-growing prostrate rosette | Winged photosynthetic petioles | Bivalve marginal traps with sensitive trigger cilia |
+| **Sunflower** | *Helianthus annuus* | Stout, hairy, ruler-straight stalk; head nods at maturity | Large heart-shaped serrated leaves on long petioles | 21 or 34 Fibonacci ray florets around a spiral seed disc |
+| **Hibiscus** | *Hibiscus rosa-sinensis* | Woody shrub, slight bends at nodes, bark at the base | Glossy oval serrated leaves | Five overlapping petals, dark eye, long staminal column |
+| **Iris** | *Iris germanica* | Ruler-straight scape with papery spathes | Basal fan of sword-shaped blades | Three upright standards over three bearded falls |
+| **Thistle** | *Cirsium vulgare* | Ridged stem with spiny wings | Deeply lobed, spine-tipped leaves | Spiny urn of bracts crowned by a purple brush |
+| **Marigold** | *Tagetes patula* | Bushy, reddish, ridged, short internodes | Finely divided pinnate leaves | Bicolour ruffled pompon |
+| **Daffodil** | *Narcissus pseudonarcissus* | Two-edged leafless scape with a swan neck | Flat strap leaves arching from the bulb | Six tepals around a ruffled trumpet, facing sideways |
+| **Rose** | *Rosa rubiginosa* | Zigzag cane with hooked prickles; arching branches | Odd-pinnate leaflets | Golden-angle spiral of cupped petals; forms a hip |
+| **Dandelion** | *Taraxacum officinale* | Hollow, smooth, whippy scape | Basal rosette of lion's-tooth leaves | Yellow ray head that reopens as a seed clock |
+| **Tulip** | *Tulipa gesneriana* | Stout, smooth, glaucous scape | Two or three broad, wavy leaves | Goblet of six tepals with dark stamens |
+| **Venus Flytrap** | *Dionaea muscipula* | Thin scape far above the traps | Rosette of hinged traps with marginal cilia | Small umbel of white flowers |
 
 ---
 
@@ -339,13 +359,15 @@ Florametric features 10 biologically distinct plant species, each with unique st
 
 Rotating text with `fillText` is a slow path in the browser: rotated glyphs bypass its glyph cache. Florametric instead rasterises each `(character, colour, size)` once into a **glyph sprite atlas** and blits sprites with `drawImage`, so rotated glyphs cost about the same as upright ones. Sprite sizes are bucketed and scaled on the GPU, so the atlas stays small.
 
-Measured in Chrome 157 on an Apple M1 Pro at DPR 2, with 3,340 glyphs in the meadow:
+Measured in Chrome 157 on an Apple M1 Pro:
 
-| Path | ms / frame |
-| :--- | :--- |
-| `fillText` with rotation (naïve) | ~61 *(at 5,215 glyphs)* |
-| Glyph atlas with rotation (Florametric) | **5.8** |
-| Full frame: simulation, glyphs, bloom | **6.4** |
+| Scene | Glyphs | ms / frame |
+| :--- | :--- | :--- |
+| `fillText` with rotation (naïve renderer) | 5,215 | ~61 |
+| Glyph atlas with rotation (Florametric) | 5,215 | ~10 |
+| Default meadow, full frame (simulation, glyphs, bloom) | ~5,000 | **9.8** |
+
+A full frame fits inside the 16.6 ms budget for 60 FPS. The glyph count grows with the number of mature plants, so a very wide meadow of large, branched plants costs more.
 
 Other techniques:
 * **Screen-space bloom:** one blur of a 1/3-scale copy per frame, instead of `shadowBlur` on every glyph.
