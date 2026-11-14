@@ -245,8 +245,8 @@
     <section id="view-embed" class="tab-view">
       <div class="docs-container">
         <div class="docs-header">
-          <h2>Time-Anchored Meadow Architect</h2>
-          <p>Generate embeddable ASCII meadow code anchored to a starting point in time (\(t_0\)). When embedded on your page or blog, plants continuously evolve in real-world time across days and weeks.</p>
+          <h2>Embed Florametric on Your Site</h2>
+          <p>Build an embed below: pick what to show, switch any trait on or off, then copy the snippet into your page. The step-by-step guide under the builder explains every part.</p>
         </div>
 
         <!-- Interactive Persistent Meadow Generator Dock -->
@@ -255,9 +255,20 @@
             
             <!-- Left: Builder Controls -->
             <div class="builder-controls">
-              
-              <!-- 1. Starting Epoch t0 -->
+
+              <!-- 0. What to embed -->
               <div class="control-group">
+                <label>What to Embed</label>
+                <div class="kind-switch" id="gen-kind" role="radiogroup" aria-label="What to embed">
+                  <button type="button" class="kind-btn" data-kind="plant" role="radio">🌷 Single Plant</button>
+                  <button type="button" class="kind-btn" data-kind="garden" role="radio">🌿 Garden</button>
+                  <button type="button" class="kind-btn active" data-kind="meadow" role="radio">⏳ Time-Anchored Meadow</button>
+                </div>
+                <p class="control-hint" id="gen-kind-hint"></p>
+              </div>
+
+              <!-- 1. Starting Epoch t0 -->
+              <div class="control-group only-meadow">
                 <div class="slider-header">
                   <label for="gen-t0">Starting Point (t₀ Epoch)</label>
                   <button type="button" id="btn-t0-now" class="mini-btn">Right Now</button>
@@ -273,7 +284,7 @@
               </div>
 
               <!-- 2. Growth / Time Scale -->
-              <div class="control-group">
+              <div class="control-group only-meadow">
                 <label for="gen-speed">Biological Growth Rate</label>
                 <select id="gen-speed" class="ctrl-select">
                   <option value="24h" selected>Real-Time: 24-Hour Growth (1 day to mature bloom)</option>
@@ -288,7 +299,7 @@
               </div>
 
               <!-- 3. Plant Count -->
-              <div class="control-group">
+              <div class="control-group not-plant">
                 <div class="slider-header">
                   <label for="gen-count">Flower Count</label>
                   <span id="val-gen-count" class="val-badge">7 plants</span>
@@ -298,7 +309,7 @@
 
               <!-- 4. Species Selection Pills -->
               <div class="control-group">
-                <label>Botanical Species in Meadow</label>
+                <label>Species (a single plant uses the first one)</label>
                 <div id="gen-species-pills" class="species-chip-grid">
                   <!-- dynamic species toggle buttons -->
                 </div>
@@ -326,6 +337,21 @@
                 </div>
               </div>
 
+              <!-- 6. Feature switches -->
+              <div class="control-group">
+                <div class="slider-header">
+                  <label>Features</label>
+                  <select id="gen-preset" class="ctrl-select mini-select" aria-label="Preset">
+                    <option value="">Preset: none</option>
+                    <option value="static">Preset: static</option>
+                    <option value="calm">Preset: calm</option>
+                    <option value="classic">Preset: classic</option>
+                    <option value="minimal">Preset: minimal</option>
+                  </select>
+                </div>
+                <div id="gen-features" class="feature-grid"></div>
+              </div>
+
             </div>
 
             <!-- Right: Live Time-Anchored Preview -->
@@ -336,7 +362,7 @@
                   <span id="gen-preview-time-title">State at Current Time</span>
                 </div>
                 <!-- Time-Travel scrub testing -->
-                <div class="time-scrub-group">
+                <div class="time-scrub-group only-meadow">
                   <span class="scrub-title">Simulate Revisit:</span>
                   <div class="scrub-pills">
                     <button type="button" class="scrub-pill active" data-shift="0">Now</button>
@@ -364,9 +390,10 @@
           <!-- Code Output Tabs -->
           <div class="code-export-dock">
             <div class="export-nav-tabs">
-              <button type="button" class="exp-tab active" data-format="webcomponent">&lt;florametric-meadow&gt; Web Component</button>
-              <button type="button" class="exp-tab" data-format="vanilla">Vanilla JavaScript API</button>
-              <button type="button" class="exp-tab" data-format="url">Shareable Meadow URL</button>
+              <button type="button" class="exp-tab active" data-format="webcomponent">HTML Web Component</button>
+              <button type="button" class="exp-tab" data-format="vanilla">JavaScript API</button>
+              <button type="button" class="exp-tab" data-format="npm">npm / Bundler</button>
+              <button type="button" class="exp-tab only-meadow" data-format="url">Shareable Meadow URL</button>
             </div>
 
             <div class="code-box-container">
@@ -379,40 +406,121 @@
 
         </div>
 
-        <div class="docs-card">
-          <h3>Option 1: Drop-In Web Component (Zero JavaScript Needed)</h3>
-          <p>Drop the script into your <code>&lt;head&gt;</code> and use the custom element anywhere in your HTML:</p>
-          <pre><code>&lt;!-- 1. Include the standalone library --&gt;
+        <div class="guide">
+          <h2 class="guide-title">Step-by-Step Integration Guide</h2>
+
+          <div class="docs-card guide-step">
+            <span class="step-num">1</span>
+            <h3>Add the script</h3>
+            <p>Florametric is one file with no dependencies. Load it once per page, anywhere before the elements you use it with:</p>
+            <pre><code>&lt;!-- From this site (GitHub Pages) --&gt;
 &lt;script src="https://shamsghani.github.io/florametric/florametric.js"&gt;&lt;/script&gt;
 
-&lt;!-- 2. Embed an animated, cursor-reactive flower or persistent meadow --&gt;
-&lt;florametric-meadow speed="24h" plant-count="7" palette="botanical" interactive&gt;&lt;/florametric-meadow&gt;
-&lt;florametric-plant type="sunflower" age="1.0" bloom="1.0" interactive&gt;&lt;/florametric-plant&gt;</code></pre>
-        </div>
+&lt;!-- or from the jsDelivr CDN --&gt;
+&lt;script src="https://cdn.jsdelivr.net/gh/shamsghani/florametric@main/florametric.js"&gt;&lt;/script&gt;</code></pre>
+            <p>Using a bundler (Vite, webpack, Next.js)? Install it from GitHub and import it. TypeScript types are included:</p>
+            <pre><code>npm install github:shamsghani/florametric
 
-        <div class="docs-card">
-          <h3>Option 2: Vanilla JavaScript API (Custom Canvas or Garden)</h3>
-          <p>Create an interactive garden or persistent meadow programmatically:</p>
-          <pre><code>import { createPersistentMeadow, AsciiPlant, AsciiGarden } from './florametric.js';
+import Florametric from 'florametric';</code></pre>
+          </div>
 
-// Create persistent time-anchored garden
-const meadow = createPersistentMeadow('#my-canvas', {
-  startTime: Date.now(),
-  speed: '24h',
-  plantCount: 7,
-  palette: 'botanical'
-});</code></pre>
-        </div>
+          <div class="docs-card guide-step">
+            <span class="step-num">2</span>
+            <h3>Place an element</h3>
+            <p>Pick the element that matches what you want. No JavaScript is needed: each one starts itself, sizes to its box and pauses while scrolled off-screen.</p>
+            <pre><code>&lt;!-- One plant --&gt;
+&lt;florametric-plant type="rose"&gt;&lt;/florametric-plant&gt;
 
-        <div class="docs-card">
-          <h3>Option 3: Static ASCII Text Generator (For READMEs & Terminal CLIs)</h3>
-          <p>Generate pure text strings with no DOM or canvas needed:</p>
-          <pre><code>const textArt = Florametric.generateString({
-  type: 'sunflower',
-  age: 1.0,
-  bloom: 1.0
+&lt;!-- A row of plants --&gt;
+&lt;florametric-garden species="sunflower,iris,tulip" count="6"&gt;&lt;/florametric-garden&gt;
+
+&lt;!-- A meadow that grows in real time from a start date --&gt;
+&lt;florametric-meadow start-time="2026-11-15" speed="7d"&gt;&lt;/florametric-meadow&gt;</code></pre>
+          </div>
+
+          <div class="docs-card guide-step">
+            <span class="step-num">3</span>
+            <h3>Size and style it</h3>
+            <p>Elements are ordinary boxes: give them a width and height with CSS. Defaults are 280×380&nbsp;px for a plant and 100%×360&nbsp;px for gardens and meadows. To sit on your own background, use <code>background="transparent"</code>. On light pages, also turn the glow off.</p>
+            <pre><code>&lt;florametric-plant type="tulip" background="transparent" glow="false"
+  style="width: 100%; height: 320px;"&gt;&lt;/florametric-plant&gt;</code></pre>
+          </div>
+
+          <div class="docs-card guide-step">
+            <span class="step-num">4</span>
+            <h3>Switch traits on or off</h3>
+            <p>Every trait is an attribute (kebab-case) and a JavaScript option (camelCase). Start from a <strong>preset</strong> and override what you need:</p>
+            <pre><code>&lt;!-- Static plants: no growth, no wind, no interaction --&gt;
+&lt;florametric-garden preset="static" species="rose,tulip" count="4"&gt;&lt;/florametric-garden&gt;
+
+&lt;!-- A still image: draws one frame, then no animation loop at all --&gt;
+&lt;florametric-plant type="tulip" preset="static" animate="false"&gt;&lt;/florametric-plant&gt;
+
+&lt;!-- Living, but flowers never wilt and nothing reseeds --&gt;
+&lt;florametric-garden flower-cycles="false" reproduction="false"&gt;&lt;/florametric-garden&gt;
+
+&lt;!-- Pure upright ASCII, no glow --&gt;
+&lt;florametric-plant type="iris" preset="classic"&gt;&lt;/florametric-plant&gt;</code></pre>
+            <p class="preset-list"><strong>Presets:</strong> <code>static</code> (still life; add <code>animate="false"</code> to stop the loop too) · <code>calm</code> (gentle, no particles or reseeding) · <code>classic</code> (upright ASCII, no glow) · <code>minimal</code> (no grass or soil, transparent). The full list is in the options reference below.</p>
+          </div>
+
+          <div class="docs-card guide-step">
+            <span class="step-num">5</span>
+            <h3>Control it from JavaScript (optional)</h3>
+            <p>Attributes can be changed at any time, and the plant reacts immediately. For full control, use the garden behind each element, or create one directly:</p>
+            <pre><code>const el = document.querySelector('florametric-garden');
+el.setAttribute('wind', '0');          // live toggle
+el.garden.set({ glow: false, rotation: false });
+
+// Or without an element (a selector, canvas or container)
+const garden = Florametric.garden('#hero', {
+  plants: ['sunflower', { type: 'rose', x: 0.7, age: 2 }],
+  preset: 'calm'
 });
-console.log(textArt);</code></pre>
+garden.on('germinate', (plant, x) =&gt; console.log('new', plant.type, 'at', x));
+
+// A still image: draws once, no animation loop
+Florametric.render('#card', { type: 'tulip', background: 'transparent' });</code></pre>
+          </div>
+
+          <div class="docs-card guide-step">
+            <span class="step-num">6</span>
+            <h3>Frameworks</h3>
+            <p>Custom elements work in every framework. Load the script once (or <code>import 'florametric'</code>) and use the tag:</p>
+            <pre><code>// React
+import 'florametric';
+export const Flower = () =&gt; &lt;florametric-plant type="rose" preset="calm" /&gt;;
+
+// Vue / Svelte / Astro templates
+&lt;florametric-garden species="iris,tulip" count="5" reproduction="false" /&gt;
+
+// React, with full control
+useEffect(() =&gt; {
+  const garden = Florametric.garden(ref.current, { preset: 'calm' });
+  return () =&gt; garden.destroy();
+}, []);</code></pre>
+            <p>For server-side rendering, render the tag only in the browser. Gardens need a <code>canvas</code>, so with a framework that renders on the server, create them inside an effect or <code>onMount</code>.</p>
+          </div>
+
+          <div class="docs-card guide-step">
+            <span class="step-num">7</span>
+            <h3>Options reference</h3>
+            <p>Defaults come from <code>Florametric.defaults</code>. Every option works as an attribute, in <code>Florametric.garden(target, options)</code> and in <code>garden.set(options)</code>.</p>
+            <div class="table-scroll"><table class="option-table" id="options-reference"></table></div>
+          </div>
+
+          <div class="docs-card guide-step">
+            <span class="step-num">?</span>
+            <h3>Troubleshooting</h3>
+            <ul class="trouble-list">
+              <li><strong>Nothing shows:</strong> the element or container has no height. Give it one with CSS.</li>
+              <li><strong>Washed-out colours on a light page:</strong> set <code>glow="false"</code>. The glow brightens what is behind it.</li>
+              <li><strong>Many embeds on one page:</strong> use <code>preset="static"</code> or <code>Florametric.render()</code> for still plants, or <code>fps="30"</code> to cap the frame rate. Off-screen embeds already pause themselves.</li>
+              <li><strong>Plants should not change between visits:</strong> set a <code>seed</code>. A meadow with a fixed <code>start-time</code> is the same for every visitor at the same moment.</li>
+              <li><strong>Motion sensitivity:</strong> visitors with “reduce motion” turned on get gentle, slow wind automatically. Force it either way with <code>reduced-motion</code>.</li>
+              <li><strong>Terminal or README output:</strong> <code>Florametric.generateString({ type: 'rose' })</code> returns plain-text ASCII art (Node or browser).</li>
+            </ul>
+          </div>
         </div>
       </div>
     </section>

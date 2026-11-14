@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Florametric · Feature toggles</title>
+  <style>
+    body { margin: 0; font-family: ui-monospace, Menlo, monospace; background: #050508; color: #cfe8cc; }
+    .wrap { display: grid; grid-template-columns: 1fr 300px; height: 100vh; }
+    #garden { position: relative; }
+    aside { padding: 18px; border-left: 1px solid #1d2a1d; overflow: auto; background: #0a0f0b; }
+    h2 { font-size: 14px; margin: 0 0 12px; color: #9fe3a0; }
+    label { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; font-size: 13px; }
+    select, input[type=range] { width: 130px; }
+    pre { font-size: 11px; background: #111a12; padding: 10px; border-radius: 6px; white-space: pre-wrap; }
+    @media (max-width: 760px) { .wrap { grid-template-columns: 1fr; grid-template-rows: 60vh auto; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="garden"></div>
+    <aside>
+      <h2>Every trait is a switch</h2>
+      <div id="controls"></div>
+      <h2>Current options</h2>
+      <pre id="code"></pre>
+    </aside>
+  </div>
+
+  <script src="../florametric.js"></script>
+  <script>
+    const garden = Florametric.garden('#garden', {
+      plants: ['sunflower', 'rose', 'iris', 'tulip', 'daffodil', 'thistle', 'hibiscus'],
+      age: 3
+    });
+
+    const toggles = ['growth', 'flowerCycles', 'aging', 'reproduction', 'gusts', 'glow', 'rotation',
+      'grass', 'soil', 'interactive', 'pollen', 'particles', 'variation'];
+    const controls = document.getElementById('controls');
+    const changed = {};
+
+    const preset = document.createElement('label');
+    preset.innerHTML = 'preset <select>' + Object.keys(Florametric.presets).map(p => `<option>${p}</option>`).join('') + '</select>';
+    preset.querySelector('select').onchange = e => { garden.set({ preset: e.target.value }); changed.preset = e.target.value; sync(); };
+    controls.appendChild(preset);
+
+    const wind = document.createElement('label');
+    wind.innerHTML = 'wind <input type="range" min="0" max="1.5" step="0.05">';
+    wind.querySelector('input').oninput = e => { garden.set({ wind: +e.target.value }); changed.wind = +e.target.value; show(); };
+    controls.appendChild(wind);
+
+    toggles.forEach(name => {
+      const row = document.createElement('label');
+      row.innerHTML = `${name} <input type="checkbox">`;
+      row.querySelector('input').onchange = e => { garden.set({ [name]: e.target.checked }); changed[name] = e.target.checked; show(); };
+      controls.appendChild(row);
+    });
+
+    function sync() {
+      wind.querySelector('input').value = garden.options.wind;
+      toggles.forEach((name, i) => { controls.querySelectorAll('input[type=checkbox]')[i].checked = !!garden.options[name]; });
+      show();
+    }
+    function show() {
+      document.getElementById('code').textContent = `garden.set(${JSON.stringify(changed, null, 2)});`;
+    }
+    sync();
+  </script>
+</body>
+</html>

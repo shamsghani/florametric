@@ -972,8 +972,10 @@
 
         if (apexDist >= 0) {
           if (l.state === 'dormant') {
+            // Start from the size the leaf already has at this height (continuous with the
+            // static view), so a plant added fully grown does not shrink back to buds
             l.state = 'bud';
-            l.maturity = 0.08;
+            l.maturity = clamp((apexDist - 2) / 48, 0.08, 1.0);
             l.age = 0.0;
             l.isDead = false;
             l.isWilted = false;
@@ -1025,8 +1027,11 @@
       const af = this.members.apicalFlower;
       if (globalAge > 0.42 && senescence < 0.92) {
         if (af.state === 'dormant') {
-          af.state = 'bud';
-          af.bloom = 0.10;
+          // A seedling's flower starts as a bud; a plant added already mature starts in the
+          // bloom its age implies (same curve as the static view)
+          const start = Math.max(0.10, smoothstep(0.42, 0.88, Math.min(1, globalAge)));
+          af.bloom = start;
+          af.state = start >= 0.92 ? 'blooming' : (start >= 0.38 ? 'opening' : 'bud');
           af.age = 0.0;
         }
 
@@ -1086,7 +1091,8 @@
         if (shootHeight >= branchStartY && globalAge > 0.45 && senescence < 0.90) {
           if (b.state === 'dormant') {
             b.state = 'growing';
-            b.currentLength = 4.0;
+            const grown = clamp((Math.min(1, globalAge) - 0.48) / 0.45, 0, 1);
+            b.currentLength = Math.max(4.0, shootHeight * b.lengthRatio * grown * (1.0 - senescence * 0.35));
             b.health = 1.0;
           }
 
@@ -4485,6 +4491,40 @@
   }
 
   /**
+   * Tallest plant that fits the canvas with room for its flower head, allowing for the
+   * genome's size gene (up to ~1.3x). Helpers never let a flower be cut off at the top.
+   */
+  function fitHeight(garden) {
+    if (!garden.cssHeight) return 320;
+    return clamp((garden.cssHeight - garden.options.groundOffset - 105) / 1.3, 60, 380);
+  }
+
+  /**
+   * Plant a spec, then measure the grown plant's real top edge (the size gene and flower
+   * heads vary) and replant it smaller, same seed and genome, if any glyph would be cut off.
+   */
+  function addFitted(garden, spec) {
+    let plant = garden.addPlant(spec);
+    if (!garden.cssHeight || plant.age < 1) return plant;
+    const margin = 10;
+    const groundY = garden.groundY;
+    // Flower heads do not shrink with the stem, so a single proportional pass can fall short
+    for (let pass = 0; pass < 3 && plant.height > 40; pass++) {
+      const entry = garden.plants[garden.plants.length - 1];
+      let top = Infinity;
+      for (const g of plant.generateGlyphs(entry.x, groundY, 0, 0, 0)) top = Math.min(top, g.y - (g.size || 12) / 2);
+      if (top >= margin) break;
+      garden.removePlant(plant);
+      garden._planted--;
+      const scale = (groundY - margin) / Math.max(1, groundY - top);
+      plant = garden.addPlant(Object.assign({}, spec, {
+        seed: plant.seed, genome: plant.genome, height: Math.max(40, plant.height * scale * 0.95)
+      }));
+    }
+    return plant;
+  }
+
+  /**
    * Florametric.garden(target, options): a garden of plants in one call.
    *   target  - selector, <canvas>, or any container element (a canvas is created inside)
    *   options - every garden option (GARDEN_DEFAULTS), plus
@@ -4493,7 +4533,11 @@
    */
   function createGarden(target, options = {}) {
     const garden = new AsciiGarden(resolveCanvas(target), options);
-    plantSpecs(options).forEach(spec => garden.addPlant(spec));
+    const fit = fitHeight(garden);
+    plantSpecs(options).forEach(spec => {
+      spec.height = Math.min(spec.height !== undefined ? spec.height : fit, fit);
+      addFitted(garden, spec);
+    });
     if (options.animate === false) {
       garden._static = true;
       garden.render();
@@ -4509,10 +4553,9 @@
     const garden = new AsciiGarden(canvas, Object.assign({ reproduction: false, immigration: false }, options));
     const plant = pick(options, PLANT_KEYS);
     if (plant.age === undefined) plant.age = 1.0;
-    if (plant.height === undefined && garden.cssHeight) {
-      plant.height = Math.max(80, Math.min(320, garden.cssHeight - garden.options.groundOffset - 90));
-    }
-    garden.addPlant(Object.assign({ x: 0.5 }, plant));
+    const fit = fitHeight(garden);
+    plant.height = Math.min(plant.height !== undefined ? plant.height : fit, fit);
+    addFitted(garden, Object.assign({ x: 0.5 }, plant));
     if (options.animate === false) {
       garden._static = true;
       garden.render();
@@ -4646,7 +4689,7 @@
         this.style.height = this.style.height || `${height + 80}px`;
         this._applyHostStyle(opts);
         const canvas = this._canvas(`Animated ASCII ${opts.type || 'sunflower'} plant`);
-        this._garden = createPlant(canvas, Object.assign({ height }, opts));
+        this._garden = createPlant(canvas, opts);
       }
     }
 
