@@ -215,16 +215,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const width = garden.cssWidth || 800;
     const species = ['sunflower', 'dandelion', 'hibiscus', 'iris', 'thistle', 'marigold', 'daffodil', 'rose'];
     const count = Math.max(5, Math.floor(width / 130));
+    // Staggered biological lifecycles: young sprout, adolescent, prime adult, mature flushes
+    const initialAges = [0.25, 2.5, 6.0, 11.5, 16.5, 0.7, 8.5, 14.0, 19.5, 1.2];
 
     for (let i = 0; i < count; i++) {
       const x = (i + 0.5) * (width / count) + (Math.random() - 0.5) * 35;
       const sp = species[i % species.length];
+      const baseAge = initialAges[i % initialAges.length];
       garden.addPlant(x, {
         type: sp,
-        age: 0.85 + Math.random() * 0.15,
+        age: baseAge + (Math.random() - 0.5) * 0.4,
+        metabolicRate: 0.75 + Math.random() * 0.50,
         height: 290 + Math.random() * 90,
         curvature: (Math.random() - 0.5) * 0.5,
-        seed: Math.floor(Math.random() * 10000)
+        seed: Math.floor(Math.random() * 100000)
       });
     }
   }
@@ -421,7 +425,14 @@ document.addEventListener('DOMContentLoaded', () => {
     sAge.addEventListener('input', e => {
       const val = parseFloat(e.target.value);
       studioPlant.setAge(val);
-      const label = val > 1.05 ? `${Math.round(val * 100)}% (Wilt)` : (val > 0.85 ? `${Math.round(val * 100)}% (Bloom)` : `${Math.round(val * 100)}%`);
+      let label = '';
+      if (val <= 1.0) {
+        label = `${Math.round(val * 100)}% (Growth)`;
+      } else if (val <= 21.0) {
+        label = `Mature Prime (${Math.round(((val - 1.0) / 20.0) * 100)}%)`;
+      } else {
+        label = `Senescence (${Math.round(((val - 21.0) / 2.5) * 100)}%)`;
+      }
       document.getElementById('val-age').textContent = label;
     });
 
