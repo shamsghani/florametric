@@ -185,4 +185,58 @@ console.log('==================================================');
   console.log('  ✓ Flowers set seed; species competition and spacing keep the meadow diverse');
 }
 
+// -------------------------------------------------------------
+// 8. Wilting is local: a spent flower never browns the whole plant;
+//    old age browns the plant gradually from the base upward
+// -------------------------------------------------------------
+{
+  const plant = new F.AsciiPlant({ type: 'sunflower', age: 5.0, seed: 21, height: 360 });
+  plant.settle();
+  const pal = plant.getPalette();
+  const af = plant.simulator.members.apicalFlower;
+  af.state = 'wilting';
+  af.bloom = 0.6;
+  af.wiltTimer = 1.0; // late in its wilt
+
+  const sim = plant.simulator.simulate(plant.age, null, 0, 0);
+  assert.strictEqual(sim.isWilting, false, 'A prime plant is not senescent just because its flower wilts');
+  assert.strictEqual(sim.flowerWilting, true, 'The flower head itself is wilting');
+
+  const glyphs = plant.generateGlyphs(400, 600, 0, 0);
+  const tissue = glyphs.filter(g => g.y > 600 - sim.shootHeight * 0.75 && g.y < 595);
+  const green = tissue.filter(g => g.fg === pal.stem || g.fg === pal.stemDark).length;
+  assert(green > tissue.length * 0.6, `Lower 75% of a prime plant must stay green while its flower wilts (${green}/${tissue.length})`);
+  assert(!tissue.some(g => g.fg === pal.wilted || g.fg === pal.dead), 'No straw/brown stem tissue below the flower stalk');
+
+  // Branch flowers keep blooming in their own colours while the apex wilts
+  const bushy = new F.AsciiPlant({ type: 'rose', age: 5.0, seed: 3, genome: { branching: 1.5, flowering: 1.4 } });
+  bushy.settle(40);
+  const br = bushy.simulator.members.branches.find(b => b.flower && b.flower.state === 'blooming');
+  if (br) {
+    bushy.simulator.members.apicalFlower.state = 'wilting';
+    bushy.simulator.members.apicalFlower.wiltTimer = 5;
+    const rosePal = bushy.getPalette().flowers.rose;
+    const bg = bushy.generateGlyphs(400, 600, 0, 0);
+    assert(bg.some(g => g.fg === rosePal.petal || g.fg === rosePal.light), 'Blooming branch flowers keep their petal colours');
+  }
+
+  // Senescence: base browns first, the tip stays greener
+  const old = new F.AsciiPlant({ type: 'sunflower', age: 21.9, seed: 21, height: 360 });
+  const oldSim = old.simulator.simulate(old.age, null, 0, 0);
+  const oldGlyphs = old.generateGlyphs(400, 600, 0, 0);
+  const oPal = old.getPalette();
+  const greenness = g => { const n = parseInt(g.fg.slice(1), 16); return ((n >> 8) & 255) - ((n >> 16) & 255); }; // G - R
+  const stemOf = band => oldGlyphs.filter(g => g.char === '|' && g.rot !== undefined &&
+    g.y < 600 - oldSim.shootHeight * band[0] && g.y > 600 - oldSim.shootHeight * band[1]);
+  const base = stemOf([0.02, 0.25]);
+  const tip = stemOf([0.70, 0.95]);
+  const avg = arr => arr.reduce((acc, g) => acc + greenness(g), 0) / Math.max(1, arr.length);
+  console.log(`  Senescent stem greenness (G-R): base ${avg(base).toFixed(0)}, tip ${avg(tip).toFixed(0)}`);
+  assert(base.length && tip.length, 'Senescent plant still has stem tissue');
+  assert(avg(base) < avg(tip), 'Senescence must brown the base before the tip');
+  assert(oldGlyphs.some(g => g.fg !== oPal.stem && g.fg !== oPal.stemDark && g.fg !== oPal.wilted && g.fg !== oPal.dead && /^#/.test(g.fg)),
+    'Ageing must produce intermediate (blended) colours, not a hard switch');
+  console.log('  ✓ Flower wilting stays local; old age browns gradually from the base up');
+}
+
 console.log('\nALL GENOME, NOISE & ROTATION TESTS PASSED! 🧬');
