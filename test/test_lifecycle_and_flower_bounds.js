@@ -57,9 +57,10 @@ console.log("\n[TEST 2] Testing Smooth Leaf Growth (No Pop-in)...");
 
 const plant = new Florametric.AsciiPlant({ type: 'sunflower', seed: 42, height: 360 });
 
-// Sample leaf maturity at incremental stem growth stages starting at emergence (age 0.16)
+// Sample leaf maturity at incremental stem growth stages from germination, so the first
+// sample with leaves is the moment the first leaf emerges (genome-independent).
 const maturitiesAtAges = [];
-for (let age = 0.16; age <= 0.85; age += 0.03) {
+for (let age = 0.02; age <= 0.85; age += 0.01) {
   const sim = plant.simulator.simulate(age, null);
   const leaves = sim.leaves;
   if (leaves.length > 0) {
@@ -190,19 +191,42 @@ simData = testPlant.simulator.simulate(testPlant.age);
 console.log(`  Phase 4: Decay stubble age=${testPlant.age.toFixed(2)}, isDecaying=${simData.isDecaying}`);
 console.assert(simData.isDecaying === true, "Age 23.4 must trigger decay stubble");
 
-// Step 5: Cycle completion & Reseed
-let reseedFired = false;
-garden.onPlantReseed = (p, x) => {
-  reseedFired = true;
-  console.log(`  ✓ onPlantReseed callback fired at x=${x.toFixed(1)}!`);
+// Step 5: End of life — the individual dies, is removed, and scatters seeds that start
+// NEW plants in other spots (offspring inherit a mutated copy of the parent genome).
+let deathFired = false;
+garden.onPlantDeath = (p, x) => {
+  deathFired = true;
+  console.log(`  ✓ onPlantDeath fired at x=${x.toFixed(1)}`);
 };
+const offspring = [];
+garden.onSeedGerminate = (p, x) => offspring.push({ p, x });
 
-// Force age to 23.499 and run update
 testPlant.age = 23.499;
-garden.update(1.0); // effectiveDt * agingSpeed will push age >= 23.5
-console.log(`  Phase 5: After cycle completion, plant age reset to ${testPlant.age.toFixed(2)}`);
-console.assert(testPlant.age < 0.20, "Plant must reset to young sprout after completing life cycle");
-console.assert(reseedFired === true, "onPlantReseed callback must fire");
+garden.update(1.0); // pushes age >= 23.5
+console.assert(deathFired === true, "onPlantDeath callback must fire");
+console.assert(!garden.plants.some(e => e.plant === testPlant), "A dead plant must be removed, not reborn in place");
+const fallingSeeds = garden.particles.filter(pt => pt.isSeed && pt.parent === testPlant);
+console.log(`  Phase 5: plant removed, ${fallingSeeds.length} seeds released`);
+console.assert(fallingSeeds.length >= 3, "A dying plant must scatter seeds");
+
+// Let the seeds fall; the meadow is below its minimum population so one must take root
+for (let i = 0; i < 400 && offspring.length === 0; i++) garden.update(0.05);
+console.assert(offspring.length >= 1, "At least one seed must germinate into a new plant");
+if (offspring.length) {
+  const child = offspring[0].p;
+  console.log(`  ✓ Seedling sprouted at x=${offspring[0].x.toFixed(1)} (generation ${child.genome.generation}, age ${child.age.toFixed(2)})`);
+  console.assert(child.type === 'sunflower', "Offspring keep the parent species");
+  console.assert(child.genome.generation === testPlant.genome.generation + 1, "Offspring inherit the parent genome");
+  console.assert(child !== testPlant, "Offspring must be a new individual");
+}
+
+// Legacy single-specimen mode: reborn in place from its own (mutated) genome
+let reseedFired = false;
+const respawnGarden = new Florametric.AsciiGarden(null, { lifecycle: 'respawn' });
+const solo = respawnGarden.addPlant(200, { type: 'rose', age: 23.499, seed: 5 });
+respawnGarden.onPlantReseed = () => { reseedFired = true; };
+respawnGarden.update(1.0);
+console.assert(solo.age < 0.20 && reseedFired, "In 'respawn' mode the plant must restart as a young sprout");
 
 // -------------------------------------------------------------
 // TEST 6: Sunlight Revitalization on Wilting Plant

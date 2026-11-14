@@ -64,7 +64,7 @@
 
     <!-- VIEW 1: THE MEADOW (GARDEN) -->
     <section id="view-garden" class="tab-view active">
-      <canvas id="garden-canvas"></canvas>
+      <canvas id="garden-canvas" role="img" aria-label="A living ASCII meadow of growing, flowering and self-seeding plants"></canvas>
       
       <!-- Garden Overlay Prompt -->
       <div class="garden-hud">
@@ -87,7 +87,7 @@
         
         <!-- Live Plant Canvas Viewport -->
         <div class="studio-display">
-          <canvas id="studio-canvas"></canvas>
+          <canvas id="studio-canvas" role="img" aria-label="ASCII specimen in the Parametric Lab"></canvas>
           
           <div class="display-stats">
             <span id="stat-leaves">Active Leaves: 4</span> &bull;
@@ -186,13 +186,13 @@
             <input type="range" id="slider-wind" min="0.0" max="1.5" step="0.05" value="0.60" class="ctrl-slider">
           </div>
 
-          <!-- Leaf Density Slider -->
-          <div class="control-group">
+          <!-- Genome: heritable traits the specimen was born with -->
+          <div class="control-group genome-group">
             <div class="slider-header">
-              <label for="slider-leaf-density">Phyllotaxis Leaf Density</label>
-              <span id="val-leaf-density" class="val-badge">1.0x</span>
+              <label>Genome (born with)</label>
+              <span id="val-generation" class="val-badge">Gen 0</span>
             </div>
-            <input type="range" id="slider-leaf-density" min="0.5" max="2.0" step="0.1" value="1.0" class="ctrl-slider">
+            <div id="genome-controls" class="genome-controls"></div>
           </div>
 
           <!-- Pointer Interaction Mode -->

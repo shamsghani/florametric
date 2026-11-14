@@ -1,17 +1,19 @@
 /**
  * Florametric — Pure Parametric & Procedural Botanical Generation
  * Zero-dependency, 100% mathematical generative system for living ASCII plants & flowers.
- * 
- * Performance Optimized: 60+ FPS screen-space bloom, zero per-glyph shadowBlur chokepoints.
- * Features:
- *  - Dandelion interactive seed blowing & 1/20 sprouting germination physics
- *  - Internal biological clock with passing of time & natural growth
- *  - Continuous multi-stage bud-to-bloom unfurling (tight sepal capsule -> peeling sepals -> cone -> full anthesis)
- *  - High genetic diversity & randomness per seed
- *  - Distinct species-specific botanical guidelines for stems and foliage
- *  - 5 Biological growth rules (internodes, bunching, auxin branching, leaf energy scaling, senescence wilting)
- *  - Interactive sunlight / plant food nourishment physics
- *  - Custom Web Components (<florametric-plant> / <ascii-plant>)
+ *
+ * Layered architecture (each layer only depends on the layers above it):
+ *   1. Math, PRNG, simplex noise & colour utilities
+ *   2. Palettes
+ *   3. Genome            — the heritable traits a plant is born with
+ *   4. BotanicalSimulator — growth, member lifecycles and noise-driven variation
+ *   5. BotanicalArchitect / ProceduralFlowerRenderer — geometry -> glyph lists
+ *   6. GlyphRenderer / TextRasterizer — glyph lists -> canvas (sprite atlas, rotation) or plain text
+ *   7. WindField, GrassTuft, AsciiPlant, AsciiGarden — the living scene
+ *   8. Web Components (<florametric-plant> / <ascii-plant>)
+ *
+ * Glyph contract: { x, y, char, fg, size, rot?, alpha? } where rot is a clockwise
+ * rotation in radians around the glyph centre.
  */
 
 (function (root, factory) {
@@ -48,6 +50,13 @@
     choice(arr) {
       return arr[Math.floor(this.next() * arr.length)];
     }
+    int(max = 0x7fffffff) {
+      return Math.floor(this.next() * max);
+    }
+    // Approximately normal(0, 1) via the sum of uniforms (Irwin–Hall, n = 4)
+    gauss() {
+      return (this.next() + this.next() + this.next() + this.next() - 2.0) * 1.7320508;
+    }
   }
 
   function clamp(val, min, max) {
@@ -63,6 +72,152 @@
     return x * x * (3 - 2 * x);
   }
 
+  /**
+   * Seeded 2D simplex noise (after Stefan Gustavson) with fractal Brownian motion.
+   * Unlike Math.random(), neighbouring inputs give neighbouring outputs, which is what
+   * makes variation read as organic growth instead of jitter. Output is in [-1, 1].
+   */
+  const GRAD2 = [1, 1, -1, 1, 1, -1, -1, -1, 1, 0, -1, 0, 0, 1, 0, -1];
+
+  class SimplexNoise {
+    constructor(seed = 1) {
+      const rng = new PRNG(seed);
+      const p = new Uint8Array(256);
+      for (let i = 0; i < 256; i++) p[i] = i;
+      for (let i = 255; i > 0; i--) {
+        const j = Math.floor(rng.next() * (i + 1));
+        const t = p[i]; p[i] = p[j]; p[j] = t;
+      }
+      this.perm = new Uint8Array(512);
+      for (let i = 0; i < 512; i++) this.perm[i] = p[i & 255];
+    }
+
+    noise2(x, y) {
+      const F2 = 0.3660254037844386;
+      const G2 = 0.21132486540518713;
+      const s = (x + y) * F2;
+      const i = Math.floor(x + s);
+      const j = Math.floor(y + s);
+      const t = (i + j) * G2;
+      const x0 = x - (i - t);
+      const y0 = y - (j - t);
+      const i1 = x0 > y0 ? 1 : 0;
+      const j1 = 1 - i1;
+      const x1 = x0 - i1 + G2;
+      const y1 = y0 - j1 + G2;
+      const x2 = x0 - 1 + 2 * G2;
+      const y2 = y0 - 1 + 2 * G2;
+      const perm = this.perm;
+      const ii = i & 255;
+      const jj = j & 255;
+      let n = 0;
+
+      let t0 = 0.5 - x0 * x0 - y0 * y0;
+      if (t0 > 0) {
+        const g = (perm[ii + perm[jj]] & 7) * 2;
+        t0 *= t0;
+        n += t0 * t0 * (GRAD2[g] * x0 + GRAD2[g + 1] * y0);
+      }
+      let t1 = 0.5 - x1 * x1 - y1 * y1;
+      if (t1 > 0) {
+        const g = (perm[ii + i1 + perm[jj + j1]] & 7) * 2;
+        t1 *= t1;
+        n += t1 * t1 * (GRAD2[g] * x1 + GRAD2[g + 1] * y1);
+      }
+      let t2 = 0.5 - x2 * x2 - y2 * y2;
+      if (t2 > 0) {
+        const g = (perm[ii + 1 + perm[jj + 1]] & 7) * 2;
+        t2 *= t2;
+        n += t2 * t2 * (GRAD2[g] * x2 + GRAD2[g + 1] * y2);
+      }
+      return 70 * n;
+    }
+
+    fbm2(x, y, octaves = 3) {
+      let sum = 0;
+      let amp = 1;
+      let norm = 0;
+      let freq = 1;
+      for (let o = 0; o < octaves; o++) {
+        sum += this.noise2(x * freq, y * freq) * amp;
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+      }
+      return sum / norm;
+    }
+
+    fbm1(x, octaves = 3) {
+      return this.fbm2(x, 17.31, octaves);
+    }
+  }
+
+  // Colour utilities (hex <-> HSL), memoised because palettes are tinted per plant
+  const _tintCache = new Map();
+
+  function hexToRgb(hex) {
+    let h = hex.charAt(0) === '#' ? hex.slice(1) : hex;
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    const n = parseInt(h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function rgbToHex(r, g, b) {
+    const c = v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0');
+    return '#' + c(r) + c(g) + c(b);
+  }
+
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, l];
+    const d = max - min;
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    let h;
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    return [h * 60, s, l];
+  }
+
+  function hslToRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360 / 360;
+    if (s === 0) return [l * 255, l * 255, l * 255];
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const hue = t => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    return [hue(h + 1 / 3) * 255, hue(h) * 255, hue(h - 1 / 3) * 255];
+  }
+
+  /**
+   * Shift a hex colour in HSL space. Results are quantised and memoised so a garden of
+   * plants maps onto a small, bounded set of colours (important for the glyph atlas).
+   */
+  function tintColor(hex, dHue, dSat, dLight) {
+    if (typeof hex !== 'string' || hex.charAt(0) !== '#') return hex;
+    const qh = Math.round(dHue);
+    const qs = Math.round(dSat * 50) / 50;
+    const ql = Math.round(dLight * 50) / 50;
+    if (qh === 0 && qs === 0 && ql === 0) return hex;
+    const key = `${hex}|${qh}|${qs}|${ql}`;
+    let out = _tintCache.get(key);
+    if (out === undefined) {
+      const [h, s, l] = rgbToHsl(...hexToRgb(hex));
+      out = rgbToHex(...hslToRgb(h + qh, clamp(s + qs, 0, 1), clamp(l + ql, 0.05, 0.95)));
+      _tintCache.set(key, out);
+    }
+    return out;
+  }
+
   // =========================================================================
   // 2. CHROMATIC PALETTES
   // =========================================================================
@@ -70,6 +225,7 @@
   const PALETTES = {
     botanical: {
       id: 'botanical',
+      colorVariance: 1.0,
       name: 'Glowing Botanical',
       stem: '#55e64b',
       stemDark: '#2da82b',
@@ -91,6 +247,7 @@
     },
     phosphor: {
       id: 'phosphor',
+      colorVariance: 0.15,
       name: 'Matrix Phosphor',
       stem: '#00ff66',
       stemDark: '#00aa44',
@@ -112,6 +269,7 @@
     },
     amber: {
       id: 'amber',
+      colorVariance: 0.15,
       name: '1982 Terminal Amber',
       stem: '#ffb000',
       stemDark: '#aa7000',
@@ -133,6 +291,7 @@
     },
     cyberpunk: {
       id: 'cyberpunk',
+      colorVariance: 0.6,
       name: 'Cyberpunk Neon',
       stem: '#00f5d4',
       stemDark: '#009e86',
@@ -154,6 +313,7 @@
     },
     monochrome: {
       id: 'monochrome',
+      colorVariance: 0.0,
       name: 'Pure Monochrome White',
       stem: '#e0e0e0',
       stemDark: '#888888',
@@ -176,7 +336,134 @@
   };
 
   // =========================================================================
-  // 3. GENETIC MORPHOLOGY & BIOLOGICAL GROWTH SIMULATOR
+  // 3. GENOME — HERITABLE TRAITS A PLANT IS BORN WITH
+  // =========================================================================
+
+  const STEM_HABITS = ['erect', 'curved_left', 'curved_right', 's_curve', 'windswept', 'zigzag'];
+
+  // [min, max] of every numeric gene. Factors are multipliers around 1.0;
+  // colour genes are normalised to [-1, 1] and scaled per species & palette.
+  const TRAIT_RANGES = {
+    lifeFactor: [0.70, 1.40],      // longevity: stretches the mature prime & member lifespans
+    vigor: [0.80, 1.25],           // metabolic growth rate
+    branching: [0.25, 1.50],       // axillary branch count & spread
+    leafing: [0.60, 1.50],         // leaf cluster count & leaf size
+    flowering: [0.65, 1.40],       // flower size, bloom duration & branch-flower fertility
+    size: [0.85, 1.22],            // overall shoot height & flower scale
+    hue: [-1.0, 1.0],              // petal hue shift (range set per species)
+    saturation: [-1.0, 1.0],
+    lightness: [-1.0, 1.0],
+    growthNoise: [0.08, 0.28],     // amplitude of noise on growth velocity & member emergence
+    shapeNoise: [0.35, 1.10],      // stem meander, leaf tilt & petal irregularity
+    windSensitivity: [0.75, 1.30]  // stem flexibility
+  };
+
+  // Natural colour diversity per species, in hue degrees at hue = ±1
+  // (tulips & roses come in many colours; sunflowers & daffodils barely vary).
+  const SPECIES_HUE_RANGE = {
+    sunflower: 10, hibiscus: 40, iris: 28, thistle: 22, marigold: 14,
+    daffodil: 8, rose: 55, dandelion: 6, tulip: 70, flytrap: 12
+  };
+
+  class Genome {
+    constructor(traits = {}) {
+      this.species = traits.species || 'sunflower';
+      this.seed = traits.seed !== undefined ? traits.seed : 42;
+      for (const key in TRAIT_RANGES) {
+        const [lo, hi] = TRAIT_RANGES[key];
+        const v = traits[key];
+        this[key] = (typeof v === 'number' && isFinite(v)) ? clamp(v, lo, hi) : (lo + hi) / 2;
+      }
+      this.habit = STEM_HABITS.includes(traits.habit) ? traits.habit : 'erect';
+      this.noiseSeed = traits.noiseSeed !== undefined ? traits.noiseSeed : this.seed;
+      this.generation = traits.generation || 0;
+      this._paletteCache = new Map();
+    }
+
+    /** A fresh, fully random genome for a species, deterministic for a given seed. */
+    static random(species = 'sunflower', seed = 42, overrides = {}) {
+      const rng = new PRNG(((seed ^ 0x5bd1e995) >>> 0) || 1);
+      const traits = { species, seed };
+      for (const key in TRAIT_RANGES) {
+        const [lo, hi] = TRAIT_RANGES[key];
+        traits[key] = rng.range(lo, hi);
+      }
+      traits.habit = rng.choice(STEM_HABITS);
+      traits.noiseSeed = rng.int();
+      return new Genome(Object.assign(traits, overrides));
+    }
+
+    static from(value, species, seed) {
+      if (value instanceof Genome) return value;
+      if (value && typeof value === 'object') return Genome.random(species, seed, value);
+      return Genome.random(species, seed);
+    }
+
+    /**
+     * Offspring genome: every gene drifts by gaussian noise proportional to its range,
+     * so lineages evolve gradually instead of jumping to unrelated morphologies.
+     */
+    mutate(seed, rate = 0.10) {
+      const rng = new PRNG(((seed ^ 0x27d4eb2d) >>> 0) || 1);
+      const child = {
+        species: this.species,
+        seed,
+        habit: rng.next() < rate * 1.5 ? rng.choice(STEM_HABITS) : this.habit,
+        noiseSeed: rng.int(),
+        generation: this.generation + 1
+      };
+      for (const key in TRAIT_RANGES) {
+        const [lo, hi] = TRAIT_RANGES[key];
+        child[key] = clamp(this[key] + rng.gauss() * (hi - lo) * rate, lo, hi);
+      }
+      return new Genome(child);
+    }
+
+    /**
+     * Derive this individual's colours from a base palette. Only the plant's own
+     * species and stem colours shift; the palette's colorVariance keeps themed
+     * palettes (phosphor, amber, monochrome) on-theme.
+     */
+    tintPalette(base) {
+      const cached = this._paletteCache.get(base.id);
+      if (cached) return cached;
+
+      const v = base.colorVariance !== undefined ? base.colorVariance : 1.0;
+      if (v <= 0) {
+        this._paletteCache.set(base.id, base);
+        return base;
+      }
+
+      const dHue = this.hue * (SPECIES_HUE_RANGE[this.species] || 15) * v;
+      const dSat = this.saturation * 0.12 * v;
+      const dLight = this.lightness * 0.07 * v;
+      const baseFlowers = base.flowers[this.species] || base.flowers.sunflower;
+      const flowers = {};
+      for (const key in baseFlowers) {
+        flowers[key] = tintColor(baseFlowers[key], dHue, dSat, dLight);
+      }
+
+      // Stems vary subtly with vigour: vigorous plants are a deeper, richer green
+      const stemLight = (this.vigor - 1.0) * -0.10 * v + this.lightness * 0.03 * v;
+      const stemHue = this.hue * 6 * v;
+      const tinted = Object.assign({}, base, {
+        stem: tintColor(base.stem, stemHue, 0, stemLight),
+        stemDark: tintColor(base.stemDark, stemHue, 0, stemLight),
+        flowers: Object.assign({}, base.flowers, { [this.species]: flowers })
+      });
+      this._paletteCache.set(base.id, tinted);
+      return tinted;
+    }
+
+    toJSON() {
+      const out = { species: this.species, seed: this.seed, habit: this.habit, noiseSeed: this.noiseSeed, generation: this.generation };
+      for (const key in TRAIT_RANGES) out[key] = Math.round(this[key] * 1000) / 1000;
+      return out;
+    }
+  }
+
+  // =========================================================================
+  // 4. GENETIC MORPHOLOGY & BIOLOGICAL GROWTH SIMULATOR
   // =========================================================================
 
   class BotanicalSimulator {
@@ -186,40 +473,67 @@
       this.userCurvature = config.curvature !== undefined ? config.curvature : 0.0;
       this.leafDensity = config.leafDensity !== undefined ? config.leafDensity : 1.0;
       this.branchingProp = config.branching !== undefined ? config.branching : 1.0;
-      this.reseedGenetics(config.seed !== undefined ? config.seed : 42);
+      const seed = config.seed !== undefined ? config.seed : 42;
+      this.reseedGenetics(seed, Genome.from(config.genome, this.type, seed));
     }
 
+    // Legacy alias used by the Parametric Lab
+    get curvature() { return this.userCurvature; }
+    set curvature(v) { this.userCurvature = v; }
+
     /**
-     * Completely re-generate genetic traits and morphology with a new genetic seed.
-     * Guarantees newly reseeded plants have distinct stem curvature, leaf positions,
-     * heights, and branch patterns rather than looking identical to the previous plant!
+     * Re-generate morphology from a seed and a genome (a random genome when omitted).
+     * The genome carries the heritable factors (life, branching, leafing, flowering, size,
+     * colour, noise); the seed PRNG places individual leaves, branches and timings.
      */
-    reseedGenetics(seed) {
+    reseedGenetics(seed, genome = null) {
       this.seed = seed;
+      this.genome = genome instanceof Genome ? genome : Genome.random(this.type, seed);
+      this.genome.species = this.type;
+      this.noise = new SimplexNoise(this.genome.noiseSeed);
+      this.clock = 0.0;
+
+      const g = this.genome;
       const rng = new PRNG(this.seed);
       this.rng = rng;
-      this.geneticHabit = rng.choice(['erect', 'curved_left', 'curved_right', 's_curve', 'windswept', 'zigzag']);
+      this.geneticHabit = g.habit;
       this.geneticBendAmp = rng.range(14, 42);
-      this.geneticHeightMod = rng.range(0.82, 1.28);
-      this.geneticMaxBranches = rng.choice([0, 1, 1, 2, 2, 3]);
-      this.geneticBranchAngles = [rng.range(0.42, 0.88), rng.range(0.52, 0.96), rng.range(0.48, 0.90)];
-      this.geneticBranchLengths = [rng.range(0.32, 0.58), rng.range(0.28, 0.52), rng.range(0.24, 0.46)];
+      this.geneticHeightMod = rng.range(0.94, 1.06) * g.size;
+      this.geneticMaxBranches = clamp(Math.round(rng.choice([0, 1, 1, 2, 2, 3]) * g.branching), 0, 3);
+      this.geneticBranchAngles = [rng.range(0.42, 0.88), rng.range(0.52, 0.96), rng.range(0.48, 0.90)]
+        .map(a => clamp(a * (0.8 + 0.2 * g.branching), 0.3, 1.1));
+      this.geneticBranchLengths = [rng.range(0.32, 0.58), rng.range(0.28, 0.52), rng.range(0.24, 0.46)]
+        .map(l => l * (0.85 + 0.15 * g.branching));
       this.geneticHeadTilt = rng.range(-0.38, 0.38);
-      this.geneticFlowerScaleMod = rng.range(0.82, 1.35);
-      this.geneticPetalChaos = rng.range(0.68, 1.38);
-      this.geneticLeafClusters = rng.choice([2, 3, 4, 5, 6]);
+      this.geneticFlowerScaleMod = rng.range(0.85, 1.25) * (0.86 + 0.14 * g.flowering) * Math.sqrt(g.size);
+      this.geneticPetalChaos = rng.range(0.68, 1.38) * (0.8 + 0.25 * g.shapeNoise);
+      this.geneticLeafClusters = clamp(Math.round(rng.choice([2, 3, 4, 5, 6]) * g.leafing), 2, 6);
 
       // Foliage Genetic Profiles: randomized placement jitters and individual leaf size variations!
+      const leafSizeMod = 0.82 + 0.18 * g.leafing;
       this.geneticLeafJitters = [];
       this.geneticLeafSizes = [];
       this.geneticPhyllotaxis = [];
       for (let i = 0; i < 10; i++) {
         this.geneticLeafJitters.push(rng.range(-0.08, 0.08));
-        this.geneticLeafSizes.push([rng.range(0.70, 1.45), rng.range(0.70, 1.45)]);
+        this.geneticLeafSizes.push([rng.range(0.70, 1.45) * leafSizeMod, rng.range(0.70, 1.45) * leafSizeMod]);
         this.geneticPhyllotaxis.push(rng.choice(['paired', 'paired', 'alternate_l', 'alternate_r']));
       }
 
       this.initMembers();
+    }
+
+    /** Swap in an edited genome while keeping the seed-driven placement. */
+    applyGenome(genome) {
+      this.reseedGenetics(this.seed, Genome.from(genome, this.type, this.seed));
+    }
+
+    /**
+     * Smooth growth-velocity multiplier from noise, always > 0, so growth timing wanders
+     * between individuals and over time without ever running backwards.
+     */
+    growthNoise(t) {
+      return 1.0 + this.genome.growthNoise * this.noise.fbm1(t * 0.12 + 3.7, 2) * 1.6;
     }
 
     /**
@@ -228,6 +542,8 @@
      */
     initMembers() {
       const rng = new PRNG(this.seed);
+      const g = this.genome;
+      const life = g.lifeFactor;
       this.members = {
         leaves: [],
         branches: [],
@@ -235,16 +551,39 @@
           state: 'dormant', // dormant, bud, opening, blooming, wilting, dead
           bloom: 0.0,
           age: 0.0,
-          lifespan: rng.range(28, 45), // 28-45s of glorious peak anthesis
+          lifespan: rng.range(28, 45) * life * (0.8 + 0.2 * g.flowering), // peak anthesis
           wiltTimer: 11.0,            // 11s of visible wilting and petal shedding
           resproutTimer: 8.0,          // 8s resting calyx before next flush
-          cycleCount: 0
+          cycleCount: 0,
+          vigor: rng.range(0.8, 1.2)
         }
       };
+      this.seedRelease = 0; // flowers that finished and set seed since the garden last looked
 
       // 1. Main Stem Leaf Members with Staggered Lifespans (Turnover occurs throughout mature life!)
       const numClusters = Math.min(6, Math.floor(this.geneticLeafClusters * this.leafDensity));
       const leafLifespanBase = [16, 24, 19, 29, 22, 34];
+      const makeLeaf = (c, side, ratio, yOffset, sizeMod, allometry, lifespan) => ({
+        id: `leaf_${c}_${side < 0 ? 'l' : 'r'}`,
+        cluster: c,
+        yRatio: ratio,
+        yOffset,
+        side,
+        scaleMod: sizeMod,
+        baseScale: sizeMod * allometry,
+        scale: sizeMod * allometry * 0.08,
+        maturity: 0.08,
+        state: 'dormant',
+        age: 0.0,
+        lifespan,
+        wiltTimer: 9.0,
+        resproutTimer: rng.range(6, 12),
+        isWilted: false,
+        isDead: false,
+        // Individual emergence speed and a coherent-noise tilt so no two leaves sit alike
+        vigor: rng.range(0.75, 1.3),
+        tilt: this.noise.noise2(c * 1.37, side * 2.11) * 0.32 * g.shapeNoise
+      });
 
       for (let c = 1; c <= numClusters; c++) {
         const baseRatio = c / (numClusters + 1);
@@ -253,90 +592,23 @@
         const phyllo = this.geneticPhyllotaxis[c % this.geneticPhyllotaxis.length];
         const sizePair = this.geneticLeafSizes[c % this.geneticLeafSizes.length];
         const allometry = 0.72 + 0.55 * Math.sin(clampedRatio * Math.PI);
-        const baseLifespan = (leafLifespanBase[c % leafLifespanBase.length] || 22) + rng.range(-3, 3);
+        const baseLifespan = ((leafLifespanBase[c % leafLifespanBase.length] || 22) + rng.range(-3, 3)) * life;
 
         if (phyllo === 'paired') {
           const yOffsetR = 2 + Math.floor(((this.seed * 3 + c * 5) % 5));
-          this.members.leaves.push({
-            id: `leaf_${c}_l`,
-            cluster: c,
-            yRatio: clampedRatio,
-            yOffset: 0,
-            side: -1,
-            scaleMod: sizePair[0],
-            baseScale: sizePair[0] * allometry,
-            scale: sizePair[0] * allometry * 0.08,
-            maturity: 0.08,
-            state: 'dormant',
-            age: 0.0,
-            lifespan: baseLifespan * rng.range(0.85, 1.15),
-            wiltTimer: 9.0,
-            resproutTimer: rng.range(6, 12),
-            isWilted: false,
-            isDead: false
-          });
-          this.members.leaves.push({
-            id: `leaf_${c}_r`,
-            cluster: c,
-            yRatio: clampedRatio,
-            yOffset: yOffsetR,
-            side: 1,
-            scaleMod: sizePair[1],
-            baseScale: sizePair[1] * allometry,
-            scale: sizePair[1] * allometry * 0.08,
-            maturity: 0.08,
-            state: 'dormant',
-            age: 0.0,
-            lifespan: baseLifespan * rng.range(0.85, 1.15),
-            wiltTimer: 9.0,
-            resproutTimer: rng.range(6, 12),
-            isWilted: false,
-            isDead: false
-          });
+          this.members.leaves.push(makeLeaf(c, -1, clampedRatio, 0, sizePair[0], allometry, baseLifespan * rng.range(0.85, 1.15)));
+          this.members.leaves.push(makeLeaf(c, 1, clampedRatio, yOffsetR, sizePair[1], allometry, baseLifespan * rng.range(0.85, 1.15)));
         } else if (phyllo === 'alternate_l') {
-          this.members.leaves.push({
-            id: `leaf_${c}_l`,
-            cluster: c,
-            yRatio: clampedRatio,
-            yOffset: 0,
-            side: -1,
-            scaleMod: sizePair[0],
-            baseScale: sizePair[0] * allometry,
-            scale: sizePair[0] * allometry * 0.08,
-            maturity: 0.08,
-            state: 'dormant',
-            age: 0.0,
-            lifespan: baseLifespan,
-            wiltTimer: 9.0,
-            resproutTimer: rng.range(6, 12),
-            isWilted: false,
-            isDead: false
-          });
+          this.members.leaves.push(makeLeaf(c, -1, clampedRatio, 0, sizePair[0], allometry, baseLifespan));
         } else {
-          this.members.leaves.push({
-            id: `leaf_${c}_r`,
-            cluster: c,
-            yRatio: clampedRatio,
-            yOffset: 0,
-            side: 1,
-            scaleMod: sizePair[1],
-            baseScale: sizePair[1] * allometry,
-            scale: sizePair[1] * allometry * 0.08,
-            maturity: 0.08,
-            state: 'dormant',
-            age: 0.0,
-            lifespan: baseLifespan,
-            wiltTimer: 9.0,
-            resproutTimer: rng.range(6, 12),
-            isWilted: false,
-            isDead: false
-          });
+          this.members.leaves.push(makeLeaf(c, 1, clampedRatio, 0, sizePair[1], allometry, baseLifespan));
         }
       }
 
       // 2. Secondary Branches (with child leaves and child flowers)
       const branchMax = Math.min(this.geneticMaxBranches, Math.floor(this.branchingProp * 3));
       const initialSide = ((this.seed % 2) === 0) ? -1 : 1;
+      const fertility = clamp(0.35 + 0.5 * g.flowering, 0, 1);
 
       for (let bi = 0; bi < branchMax; bi++) {
         const branchSide = (bi % 2 === 0) ? initialSide : -initialSide;
@@ -345,40 +617,28 @@
         const bAngle = this.geneticBranchAngles[bi % this.geneticBranchAngles.length] || 0.65;
 
         // Child leaves on this branch
-        const branchLeaves = [
-          {
-            id: `br_leaf_${bi}_0`,
-            posAlong: 0.45,
-            side: -branchSide,
-            scale: 0.75,
-            state: 'dormant',
-            age: 0.0,
-            lifespan: rng.range(50, 90),
-            wiltTimer: 16.0,
-            resproutTimer: rng.range(20, 35)
-          },
-          {
-            id: `br_leaf_${bi}_1`,
-            posAlong: 0.80,
-            side: branchSide,
-            scale: 0.65,
-            state: 'dormant',
-            age: 0.0,
-            lifespan: rng.range(50, 90),
-            wiltTimer: 16.0,
-            resproutTimer: rng.range(20, 35)
-          }
-        ];
+        const branchLeaves = [0.45, 0.80].map((posAlong, li) => ({
+          id: `br_leaf_${bi}_${li}`,
+          posAlong,
+          side: li === 0 ? -branchSide : branchSide,
+          scale: (li === 0 ? 0.75 : 0.65) * (0.85 + 0.15 * g.leafing),
+          state: 'dormant',
+          age: 0.0,
+          lifespan: rng.range(50, 90) * life,
+          wiltTimer: 16.0,
+          resproutTimer: rng.range(20, 35)
+        }));
 
-        // Child flower at branch tip
+        // Child flower at branch tip (a sterile shoot never buds)
         const branchFlower = {
           id: `br_flower_${bi}`,
           state: 'dormant',
           bloom: 0.0,
           age: 0.0,
-          lifespan: rng.range(70, 130),
+          lifespan: rng.range(70, 130) * life,
           resproutTimer: rng.range(25, 45),
-          isDead: false
+          isDead: false,
+          sterile: rng.next() > fertility
         };
 
         this.members.branches.push({
@@ -394,7 +654,8 @@
           isDead: false,
           deathTimer: 0.0,
           leaves: branchLeaves,
-          flower: branchFlower
+          flower: branchFlower,
+          wiggle: rng.range(0, 100)
         });
       }
     }
@@ -405,6 +666,11 @@
     updateMembers(dt, timeSpeed = 1.0, globalAge = 0.0) {
       if (!this.members) this.initMembers();
       const effectiveDt = dt * timeSpeed;
+      this.clock += effectiveDt;
+      const g = this.genome;
+      const noise = this.noise;
+      const clock = this.clock;
+      const rng = this.rng;
       const effectiveMaxHeight = this.maxHeight * this.geneticHeightMod;
       const growthFactor = (1 - Math.exp(-4 * Math.min(1.0, globalAge))) / (1 - Math.exp(-4));
       const senescence = (globalAge > 21.0) ? clamp((globalAge - 21.0) / 2.5, 0.0, 1.0) : 0.0;
@@ -412,9 +678,11 @@
       if (senescence > 0) shootHeight = Math.max(16, shootHeight * (1.0 - senescence * 0.22));
 
       // 1. UPDATE MAIN STEM LEAVES (Active turnover during mature prime!)
-      this.members.leaves.forEach(l => {
+      this.members.leaves.forEach((l, li) => {
         const nodeTargetY = l.yRatio * (effectiveMaxHeight * 0.88);
         const apexDist = shootHeight - nodeTargetY;
+        // Per-leaf emergence speed wanders smoothly with noise (never negative)
+        const leafRate = (l.vigor || 1.0) * Math.max(0.25, 1.0 + g.growthNoise * 2.2 * noise.noise2(li * 3.1, clock * 0.15));
 
         if (apexDist >= 0) {
           if (l.state === 'dormant') {
@@ -426,7 +694,7 @@
           }
 
           if (l.state === 'bud' || l.state === 'growing') {
-            l.maturity = Math.min(1.0, l.maturity + effectiveDt * 0.15);
+            l.maturity = Math.min(1.0, l.maturity + effectiveDt * 0.15 * leafRate);
             if (l.maturity >= 1.0) {
               l.state = 'mature';
             }
@@ -461,7 +729,7 @@
               l.isWilted = false;
               l.wiltTimer = 9.0;
               l.resproutTimer = 7.0;
-              l.lifespan = 20.0 + Math.random() * 15.0;
+              l.lifespan = (20.0 + rng.next() * 15.0) * g.lifeFactor;
             }
           }
         }
@@ -476,11 +744,12 @@
           af.age = 0.0;
         }
 
+        const bloomRate = (af.vigor || 1.0) * Math.max(0.3, 1.0 + g.growthNoise * 2.0 * noise.noise2(91.7, clock * 0.11));
         if (af.state === 'bud') {
-          af.bloom = Math.min(0.40, af.bloom + effectiveDt * 0.08);
+          af.bloom = Math.min(0.40, af.bloom + effectiveDt * 0.08 * bloomRate);
           if (af.bloom >= 0.38) af.state = 'opening';
         } else if (af.state === 'opening') {
-          af.bloom = Math.min(1.0, af.bloom + effectiveDt * 0.10);
+          af.bloom = Math.min(1.0, af.bloom + effectiveDt * 0.10 * bloomRate);
           if (af.bloom >= 0.92) af.state = 'blooming';
         } else if (af.state === 'blooming') {
           af.age += effectiveDt;
@@ -495,6 +764,7 @@
             af.state = 'dead';
             af.bloom = 0.0;
             af.resproutTimer = 8.0;
+            this.seedRelease++; // the spent flower head sets seed
           }
         } else if (af.state === 'dead' && senescence < 0.85) {
           af.resproutTimer -= effectiveDt;
@@ -503,7 +773,7 @@
             af.bloom = 0.10;
             af.age = 0.0;
             af.cycleCount++;
-            af.lifespan = 28.0 + Math.random() * 16.0;
+            af.lifespan = (28.0 + rng.next() * 16.0) * g.lifeFactor * (0.8 + 0.2 * g.flowering);
           }
         }
       }
@@ -554,7 +824,7 @@
 
           // Update child flower on this branch
           const bf = b.flower;
-          if (bf.state === 'dormant' && b.currentLength >= targetLen * 0.85) {
+          if (bf.state === 'dormant' && !bf.sterile && b.currentLength >= targetLen * 0.85) {
             bf.state = 'bud';
             bf.bloom = 0.15;
             bf.age = 0.0;
@@ -573,6 +843,7 @@
               bf.state = 'dead';
               bf.isDead = true;
               bf.resproutTimer = 35.0;
+              this.seedRelease++;
             }
           } else if (bf.state === 'dead' && b.health > 0.6 && senescence < 0.85) {
             bf.resproutTimer -= effectiveDt;
@@ -600,7 +871,7 @@
             // Progressive organic probability to die and break off once health is depleted
             if (b.health <= 0.0) {
               b.deathTimer += effectiveDt;
-              if (Math.random() < (0.06 * effectiveDt) || b.deathTimer > 30.0) {
+              if (rng.next() < (0.06 * effectiveDt) || b.deathTimer > 30.0) {
                 b.isDead = true;
                 b.state = 'dead';
               }
@@ -650,8 +921,15 @@
       });
     }
 
-    simulate(age = 1.0, bloomOverride = null, time = 0, windStrength = 0.5, pointerDist = null) {
+    /**
+     * Pure snapshot of the plant's geometry at a given biological age.
+     * gust in [-1, 1] is the local wind-field value (see WindField).
+     */
+    simulate(age = 1.0, bloomOverride = null, time = 0, windStrength = 0.5, pointerDist = null, gust = 0) {
       age = Math.max(0.02, age);
+      const g = this.genome;
+      const noise = this.noise;
+      const flex = g.windSensitivity;
       const growthAge = Math.min(1.0, age);
       // Mature prime life plateau: stays at full height for at least 20n (1.0 <= age <= 21.0)!
       const senescence = (age > 21.0) ? clamp((age - 21.0) / 2.5, 0.0, 1.0) : 0.0;
@@ -686,12 +964,20 @@
 
         dx += Math.sin(t * Math.PI * 0.9) * (this.userCurvature * 45);
 
+        // Organic meander from noise, keyed to absolute height so tissue that has already
+        // grown keeps its shape while the apex keeps extending.
+        const yAbs = t * shootHeight;
+        dx += noise.fbm2(yAbs / 75, 4.2, 3) * 11 * g.shapeNoise * Math.min(1.0, yAbs / 50);
+
         // Turgor loss during senescence causes stem to bow/droop with gravity
         if (senescence > 0) {
           dx += (this.seed % 2 === 0 ? 1 : -1) * Math.sin(t * Math.PI) * (24 * senescence * t);
         }
 
-        const windWave = Math.sin(time * 2.2 + t * 2.5) * (windStrength * 16 * Math.pow(t, 1.4));
+        // Harmonic sway modulated by travelling gusts, plus a fine per-plant flutter
+        const bend = windStrength * 16 * Math.pow(t, 1.4) * flex;
+        const windWave = (Math.sin(time * 2.2 + t * 2.5) * (0.65 + 0.35 * Math.abs(gust)) + gust * 0.9) * bend
+          + noise.noise2(time * 0.9, t * 1.7) * bend * 0.25;
 
         let pointerDeflection = 0;
         if (pointerDist) {
@@ -706,7 +992,14 @@
 
         const x = dx + windWave + pointerDeflection;
         const y = t * shootHeight;
-        stemNodes.push({ x, y, t });
+        stemNodes.push({ x, y, t, angle: 0 });
+      }
+
+      // Tangent of the stem at every node: clockwise lean from vertical, used to rotate glyphs
+      for (let i = 0; i < stemNodes.length; i++) {
+        const a = stemNodes[Math.max(0, i - 1)];
+        const b = stemNodes[Math.min(stemNodes.length - 1, i + 1)];
+        stemNodes[i].angle = Math.atan2(b.x - a.x, Math.max(1e-3, b.y - a.y));
       }
 
       // 2. Leaves with Member Subcycles and Smooth Allometric Emergence
@@ -743,7 +1036,8 @@
               scale,
               maturity,
               isWilted: isW,
-              state: l.state
+              state: l.state,
+              tilt: l.tilt || 0
             };
             leaves.push(leafObj);
             if (!isW && maturity > 0.35) {
@@ -828,7 +1122,15 @@
         flowerScale,
         headTilt: this.geneticHeadTilt + (senescence * 0.45 * (this.seed % 2 === 0 ? 1 : -1)),
         petalChaos: this.geneticPetalChaos,
-        activeLeafCount: activeLeaves.length
+        activeLeafCount: activeLeaves.length,
+        branchCount: branches.length,
+        // Flower heads nod with the stem tip and the gusts
+        windLean: clamp((stemNodes[stemNodes.length - 1].angle || 0) * 0.6, -0.45, 0.45),
+        leafFlutter: windStrength * flex * (0.08 * Math.sin(time * 3.1) + 0.12 * gust),
+        shapeNoise: g.shapeNoise,
+        variant: (Math.imul(this.seed | 0, 2654435761) >>> 0) / 4294967296,
+        noise,
+        time
       };
     }
   }
@@ -866,162 +1168,195 @@
 
       // -------------------------------------------------------------
       // 1. STEM DRAWING (SPECIES-SPECIFIC)
+      // Every stem glyph is rotated to the local tangent of the stem spline and
+      // multi-strand stems are offset perpendicular to it, so curves read as
+      // continuous strokes instead of stair-stepped columns.
       // -------------------------------------------------------------
+      const stem = (n, offset, char, fg, size) => {
+        const ca = Math.cos(n.angle);
+        const sa = Math.sin(n.angle);
+        glyphs.push({ x: originX + n.x + ca * offset, y: groundY - n.y + sa * offset, char, fg, size, rot: n.angle });
+      };
+
       if (pType === 'sunflower') {
         for (let i = 0; i < nodes.length; i++) {
           const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
           const ch = (i % 5 === 0) ? "%" : ((i % 7 === 0) ? "#" : "|");
           if (n.y < shootH * 0.55) {
-            glyphs.push({ x: px - 4, y: py, char: "|", fg: cStem, size: 14 });
-            glyphs.push({ x: px, y: py, char: ch, fg: cStem, size: 14 });
-            glyphs.push({ x: px + 4, y: py, char: "|", fg: cStem, size: 14 });
+            stem(n, -4, "|", cStem, 14);
+            stem(n, 0, ch, cStemDark, 14);
+            stem(n, 4, "|", cStem, 14);
           } else {
-            glyphs.push({ x: px - 2, y: py, char: "|", fg: cStem, size: 14 });
-            glyphs.push({ x: px + 2, y: py, char: ch, fg: cStem, size: 14 });
+            stem(n, -2, "|", cStem, 14);
+            stem(n, 2, ch, cStemDark, 14);
           }
         }
       } else if (pType === 'iris') {
         for (let i = 0; i < nodes.length; i++) {
           const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
-          const ch = (i > 8 && nodes[i].x > nodes[i - 4].x) ? "/" : ((i > 8 && nodes[i].x < nodes[i - 4].x) ? "\\" : "|");
-          glyphs.push({ x: px, y: py, char: ch, fg: cStem, size: 14 });
+          stem(n, 0, "|", cStem, 14);
           if (i % 12 === 0 && i > 5 && i < nodes.length - 8) {
-            glyphs.push({ x: px - 4, y: py - 4, char: "(", fg: cStemDark, size: 13 });
-            glyphs.push({ x: px + 4, y: py - 4, char: ")", fg: cStemDark, size: 13 });
+            stem({ x: n.x, y: n.y + 4, angle: n.angle }, -4, "(", cStemDark, 13);
+            stem({ x: n.x, y: n.y + 4, angle: n.angle }, 4, ")", cStemDark, 13);
           }
         }
       } else if (pType === 'thistle') {
         for (let i = 0; i < nodes.length; i++) {
           const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
-          glyphs.push({ x: px, y: py, char: "|", fg: cStem, size: 14 });
+          stem(n, 0, "|", cStem, 14);
           if (i % 3 === 0) {
-            glyphs.push({ x: px - 5, y: py, char: "!", fg: cStem, size: 12 });
-            glyphs.push({ x: px + 5, y: py, char: "!", fg: cStem, size: 12 });
+            stem(n, -5, "!", cStem, 12);
+            stem(n, 5, "!", cStem, 12);
           }
         }
       } else if (pType === 'dandelion') {
         for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
-          glyphs.push({ x: px, y: py, char: "|", fg: cStem, size: 14 });
+          stem(nodes[i], 0, "|", cStem, 14);
         }
       } else if (pType === 'rose') {
         for (let i = 0; i < nodes.length; i++) {
           const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
-          glyphs.push({ x: px, y: py, char: "|", fg: cStem, size: 14 });
+          stem(n, 0, "|", cStem, 14);
           if (i % 7 === 0 && i > 3) {
             const thornSide = (i % 14 === 0) ? -1 : 1;
-            glyphs.push({ x: px + thornSide * 6, y: py, char: thornSide < 0 ? "<" : ">", fg: '#d23737', size: 13 });
+            stem(n, thornSide * 6, thornSide < 0 ? "<" : ">", '#d23737', 13);
           }
         }
       } else if (pType === 'tulip') {
         for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
-          glyphs.push({ x: px - 2, y: py, char: "|", fg: cStem, size: 14 });
-          glyphs.push({ x: px + 2, y: py, char: "|", fg: cStem, size: 14 });
+          stem(nodes[i], -2, "|", cStem, 14);
+          stem(nodes[i], 2, "|", cStemDark, 14);
         }
       } else if (pType === 'marigold') {
         for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
-          glyphs.push({ x: px, y: py, char: (i % 4 === 0 ? ":" : "|"), fg: cStem, size: 13 });
+          stem(nodes[i], 0, (i % 4 === 0 ? ":" : "|"), cStem, 13);
         }
       } else if (pType === 'daffodil') {
         for (let i = 0; i < nodes.length; i++) {
-          const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
-          glyphs.push({ x: px, y: py, char: "|", fg: cStem, size: 14 });
+          stem(nodes[i], 0, "|", cStem, 14);
         }
-        const apexX = originX + nodes[nodes.length - 1].x;
-        const apexY = groundY - nodes[nodes.length - 1].y;
-        glyphs.push({ x: apexX - 4, y: apexY + 4, char: "(", fg: '#b49650', size: 13 });
-        glyphs.push({ x: apexX + 4, y: apexY + 4, char: ")", fg: '#b49650', size: 13 });
+        const top = nodes[nodes.length - 1];
+        stem({ x: top.x, y: top.y - 4, angle: top.angle }, -4, "(", '#b49650', 13);
+        stem({ x: top.x, y: top.y - 4, angle: top.angle }, 4, ")", '#b49650', 13);
       } else {
         for (let i = 0; i < nodes.length; i++) {
           const n = nodes[i];
-          const px = originX + n.x;
-          const py = groundY - n.y;
           const ch = (i % 6 === 0) ? "%" : ((i % 7 === 0) ? "+" : "|");
           if (n.y < shootH * 0.4) {
-            glyphs.push({ x: px - 3, y: py, char: "|", fg: cStem, size: 14 });
-            glyphs.push({ x: px + 3, y: py, char: ch, fg: cStem, size: 14 });
+            stem(n, -3, "|", cStem, 14);
+            stem(n, 3, ch, cStem, 14);
           } else {
-            glyphs.push({ x: px, y: py, char: ch, fg: cStem, size: 14 });
+            stem(n, 0, ch, cStem, 14);
           }
         }
       }
 
       // -------------------------------------------------------------
       // 2. FOLIAGE DRAWING (SPECIES-SPECIFIC)
+      // Leaves are laid out in a leaf-local frame and rotated as a whole around their
+      // base (genetic tilt + noise + wind flutter); each glyph shares that rotation.
       // -------------------------------------------------------------
+      const flutter = pData.leafFlutter || 0;
+      const growthAge = pData.growthAge !== undefined ? pData.growthAge : Math.min(1.0, age);
+      const leafPush = (bx, by, theta, ox, oy, char, fg, size) => {
+        const ct = Math.cos(theta);
+        const st = Math.sin(theta);
+        glyphs.push({ x: bx + ox * ct - oy * st, y: by + ox * st + oy * ct, char, fg, size, rot: theta });
+      };
+      const nodeAt = y => {
+        const t = y / Math.max(1, shootH);
+        return nodes[Math.min(nodes.length - 1, Math.max(0, Math.floor(t * (nodes.length - 1))))];
+      };
+
       if (pType === 'iris') {
-        const bladeHeights = [shootH * 0.55, shootH * 0.72, shootH * 0.85, shootH * 0.62];
-        const bladeOffsets = [-22, -10, 12, 24];
+        // Fan of flat, sword-shaped (ensiform) blades: two strands that taper to a point,
+        // leaning gently outward and swaying with the wind
+        const bladeHeights = [0.55, 0.72, 0.85, 0.62, 0.48].map(h => h * shootH * (0.3 + 0.7 * growthAge));
+        const bladeLean = [-0.30, -0.14, 0.04, 0.18, 0.34];
         bladeHeights.forEach((bh, bIdx) => {
-          const bx = bladeOffsets[bIdx];
-          const steps = Math.floor(bh / 10);
-          for (let bi = 0; bi <= steps; bi++) {
-            const bt = bi / steps;
-            const by = groundY - (bi * 10);
-            const curv = Math.sin(bt * Math.PI * 0.5) * (bx * 0.4);
-            const px = originX + bx + curv;
-            const ch = bx > 0 ? "/" : "\\";
-            glyphs.push({ x: px, y: by, char: ch, fg: bt < 0.7 ? cStem : cStemDark, size: 13 });
+          const steps = Math.max(3, Math.floor(bh / 9));
+          const lean = bladeLean[bIdx] * (pData.isWilting ? 1.8 : 1.0);
+          const sway = flutter * 28 + (pData.noise ? pData.noise.noise2(bIdx * 4.3, time * 0.5) * 3 : 0);
+          const baseX = originX + bladeLean[bIdx] * 18;
+          let prevX = baseX;
+          let prevY = groundY;
+          for (let st = 1; st <= steps; st++) {
+            const u = st / steps;
+            const px = baseX + Math.sin(lean) * bh * u + lean * 14 * u * u + sway * u * u;
+            const py = groundY - bh * u + (pData.isWilting ? u * u * bh * 0.25 : 0);
+            const rot = Math.atan2(px - prevX, Math.max(0.5, prevY - py));
+            const w = 2.6 * (1 - u * 0.75);
+            const ca = Math.cos(rot);
+            const sa = Math.sin(rot);
+            const col = u < 0.7 ? cStem : cStemDark;
+            glyphs.push({ x: px - ca * w, y: py - sa * w, char: "|", fg: col, size: 13, rot });
+            if (u < 0.92) glyphs.push({ x: px + ca * w, y: py + sa * w, char: "|", fg: cStemDark, size: 13, rot });
+            prevX = px;
+            prevY = py;
           }
-          glyphs.push({ x: originX + bx * 1.4, y: groundY - bh, char: "^", fg: cStem, size: 12 });
         });
       } else if (pType === 'dandelion') {
-        const baseAngles = [-1.3, -0.9, -0.5, -0.2, 0.2, 0.5, 0.9, 1.3];
+        // Basal rosette of runcinate ("lion's tooth") leaves lying low over the soil.
+        // Sized by growth age (0..1), never by total lifespan.
         const numLeaves = 6 + (seed % 3);
+        const wilt = pData.senescence || 0;
+        const leafCol = wilt > 0.15 ? cWilted : cStem;
+        const toothCol = wilt > 0.15 ? cDead : cStemDark;
         for (let i = 0; i < numLeaves; i++) {
-          const ang = baseAngles[i % baseAngles.length] + (((seed * (i + 1) * 7) % 11) - 5) * 0.04;
-          const leafScale = 0.75 + (((seed * (i + 3) * 13) % 17) / 17) * 0.55;
-          const leafLen = (48 + Math.sin(ang * 4) * 22) * age * leafScale;
-          for (let dist = 10; dist <= leafLen; dist += 8) {
-            const lx = originX + Math.sin(ang) * dist;
-            const ly = groundY - Math.cos(ang) * (dist * 0.35);
-            glyphs.push({ x: lx, y: ly, char: ang < 0 ? ">" : "<", fg: cStem, size: Math.max(10, Math.round(13 * leafScale)) });
-            glyphs.push({ x: lx, y: ly - 3, char: "#", fg: cStemDark, size: Math.max(9, Math.round(11 * leafScale)) });
+          const side = i % 2 === 0 ? -1 : 1;
+          const rank = Math.floor(i / 2);
+          const elev = 0.18 + rank * 0.16 + (((seed * (i + 1) * 7) % 11) - 5) * 0.015 - wilt * 0.2;
+          const leafScale = 0.75 + (((seed * (i + 3) * 13) % 17) / 17) * 0.45;
+          const leafLen = (34 + 22 * Math.cos(rank * 0.9)) * leafScale * (0.25 + 0.75 * growthAge);
+          const theta = side < 0 ? Math.PI + elev : -elev; // direction of the midrib
+          const dirX = Math.cos(theta);
+          const dirY = Math.sin(theta);
+          for (let d = 6; d <= leafLen; d += 7) {
+            const u = d / leafLen;
+            const droop = u * u * (5 + wilt * 10) - flutter * 20 * u;
+            const mx = originX + dirX * d;
+            const my = groundY - 2 + dirY * d + droop;
+            glyphs.push({ x: mx, y: my, char: "-", fg: leafCol, size: 12, rot: theta });
+            // Backward-pointing lobes, widest mid-leaf, alternating above and below the midrib
+            const lobe = Math.sin(u * Math.PI) * 5 * leafScale;
+            if (lobe > 1.5 && (d / 7) % 2 < 1) {
+              const up = ((d / 7) % 4) < 2 ? -1 : 1;
+              glyphs.push({
+                x: mx - dirY * lobe * up,
+                y: my + dirX * lobe * up,
+                char: side < 0 ? ">" : "<",
+                fg: toothCol,
+                size: Math.max(9, Math.round(10 * leafScale)),
+                rot: side < 0 ? elev : -elev
+              });
+            }
           }
         }
       } else if (pType === 'marigold') {
         leaves.forEach(leaf => {
-          const t = leaf.y / Math.max(1, shootH);
-          const nIdx = Math.min(nodes.length - 1, Math.floor(t * (nodes.length - 1)));
-          const lx = originX + nodes[nIdx].x;
+          const n = nodeAt(leaf.y);
+          const lx = originX + n.x;
           const lyScreen = groundY - leaf.y;
           const lScale = leaf.scale || 1.0;
           const isW = leaf.isWilted;
           const col = isW ? cWilted : cStem;
+          const theta = -leaf.side * (0.12 + leaf.tilt) + flutter;
 
           if (leaf.state === 'bud') {
-            glyphs.push({ x: lx + leaf.side * 4, y: lyScreen - 2, char: leaf.side < 0 ? "'" : "`", fg: cStem, size: 10 });
+            leafPush(lx, lyScreen, theta, leaf.side * 4, -2, leaf.side < 0 ? "'" : "`", cStem, 10);
             return;
           }
 
           const rachisLen = Math.round(32 * lScale);
           for (let r = 8; r <= rachisLen; r += 8) {
-            const rx = lx + leaf.side * r;
-            const ry = lyScreen - (r * 0.25) + (isW ? r * 0.45 : 0);
-            glyphs.push({ x: rx, y: ry, char: isW ? "~" : "-", fg: col, size: Math.max(9, Math.round(12 * lScale)) });
+            const ox = leaf.side * r;
+            const oy = -(r * 0.25) + (isW ? r * 0.45 : 0);
+            leafPush(lx, lyScreen, theta, ox, oy, isW ? "~" : "-", col, Math.max(9, Math.round(12 * lScale)));
             if (!isW) {
-              glyphs.push({ x: rx, y: ry - 6 * lScale, char: "/", fg: cStem, size: Math.max(8, Math.round(11 * lScale)) });
-              glyphs.push({ x: rx, y: ry + 6 * lScale, char: "\\", fg: cStem, size: Math.max(8, Math.round(11 * lScale)) });
+              leafPush(lx, lyScreen, theta, ox, oy - 6 * lScale, "/", cStem, Math.max(8, Math.round(11 * lScale)));
+              leafPush(lx, lyScreen, theta, ox, oy + 6 * lScale, "\\", cStem, Math.max(8, Math.round(11 * lScale)));
             } else {
-              glyphs.push({ x: rx, y: ry + 4 * lScale, char: "\\", fg: cDead, size: Math.max(8, Math.round(10 * lScale)) });
+              leafPush(lx, lyScreen, theta, ox, oy + 4 * lScale, "\\", cDead, Math.max(8, Math.round(10 * lScale)));
             }
           }
         });
@@ -1031,103 +1366,103 @@
           for (let step = 0; step <= tLeafH; step += 9) {
             const lt = step / tLeafH;
             const ly = groundY - step;
-            const arch = Math.sin(lt * Math.PI) * 28 * side;
+            const arch = Math.sin(lt * Math.PI) * 28 * side + flutter * 25 * lt * lt;
+            const slope = Math.cos(lt * Math.PI) * Math.PI * 28 * side / tLeafH;
+            const rot = Math.atan2(slope, 1);
             const lx = originX + arch;
-            glyphs.push({ x: lx, y: ly, char: side < 0 ? "(" : ")", fg: cStem, size: 15 });
-            glyphs.push({ x: lx + side * 3, y: ly, char: "|", fg: cStemDark, size: 13 });
+            glyphs.push({ x: lx, y: ly, char: side < 0 ? "(" : ")", fg: cStem, size: 15, rot });
+            glyphs.push({ x: lx + side * 3, y: ly, char: "|", fg: cStemDark, size: 13, rot });
           }
         });
       } else if (pType === 'thistle') {
         leaves.forEach(leaf => {
-          const t = leaf.y / Math.max(1, shootH);
-          const nIdx = Math.min(nodes.length - 1, Math.floor(t * (nodes.length - 1)));
-          const lx = originX + nodes[nIdx].x;
+          const n = nodeAt(leaf.y);
+          const lx = originX + n.x;
           const lyScreen = groundY - leaf.y;
           const lScale = leaf.scale || 1.0;
           const isW = leaf.isWilted;
           const col = isW ? cWilted : cStem;
+          const theta = -leaf.side * (0.10 + leaf.tilt) + flutter;
 
           if (leaf.state === 'bud') {
-            glyphs.push({ x: lx + leaf.side * 4, y: lyScreen - 2, char: "*", fg: cStem, size: 10 });
+            leafPush(lx, lyScreen, theta, leaf.side * 4, -2, "*", cStem, 10);
             return;
           }
           if (isW) {
-            glyphs.push({ x: lx + leaf.side * 8 * lScale, y: lyScreen + 6 * lScale, char: "\\", fg: cWilted, size: 12 });
-            glyphs.push({ x: lx + leaf.side * 14 * lScale, y: lyScreen + 12 * lScale, char: "~", fg: cDead, size: 11 });
-            glyphs.push({ x: lx + leaf.side * 20 * lScale, y: lyScreen + 18 * lScale, char: "v", fg: cDead, size: 10 });
+            leafPush(lx, lyScreen, theta, leaf.side * 8 * lScale, 6 * lScale, "\\", cWilted, 12);
+            leafPush(lx, lyScreen, theta, leaf.side * 14 * lScale, 12 * lScale, "~", cDead, 11);
+            leafPush(lx, lyScreen, theta, leaf.side * 20 * lScale, 18 * lScale, "v", cDead, 10);
             return;
           }
           const spinyPts = [
-            { ox: leaf.side * 8 * lScale, oy: -6 * lScale, ch: "/" }, { ox: leaf.side * 16 * lScale, oy: -10 * lScale, ch: "*" }, { ox: leaf.side * 22 * lScale, oy: -6 * lScale, ch: "\\" },
-            { ox: leaf.side * 12 * lScale, oy: 0, ch: "#" }, { ox: leaf.side * 20 * lScale, oy: 0, ch: "%" }, { ox: leaf.side * 28 * lScale, oy: 0, ch: "!" },
-            { ox: leaf.side * 8 * lScale, oy: 6 * lScale, ch: "\\" }, { ox: leaf.side * 16 * lScale, oy: 10 * lScale, ch: "*" }, { ox: leaf.side * 24 * lScale, oy: 6 * lScale, ch: "/" }
+            { ox: 8, oy: -6, ch: "/" }, { ox: 16, oy: -10, ch: "*" }, { ox: 22, oy: -6, ch: "\\" },
+            { ox: 12, oy: 0, ch: "#" }, { ox: 20, oy: 0, ch: "%" }, { ox: 28, oy: 0, ch: "!" },
+            { ox: 8, oy: 6, ch: "\\" }, { ox: 16, oy: 10, ch: "*" }, { ox: 24, oy: 6, ch: "/" }
           ];
+          const size = Math.max(10, Math.round(13 * lScale));
           spinyPts.forEach(pt => {
-            glyphs.push({ x: lx + pt.ox, y: lyScreen + pt.oy, char: pt.ch, fg: col, size: Math.max(10, Math.round(13 * lScale)) });
+            leafPush(lx, lyScreen, theta, leaf.side * pt.ox * lScale, pt.oy * lScale, pt.ch, col, size);
           });
         });
       } else if (pType === 'daffodil') {
-        [-1, 1].forEach(side => {
-          const leafH = shootH * 0.75;
-          for (let step = 0; step <= leafH; step += 10) {
-            glyphs.push({ x: originX + side * 16, y: groundY - step, char: "|", fg: cStem, size: 14 });
+        // Flat ribbon leaves rising from the bulb and arching outward under their own weight
+        [-1, -1, 1, 1].forEach((side, li) => {
+          const leafH = shootH * (li % 2 === 0 ? 0.62 : 0.48) * (0.3 + 0.7 * growthAge);
+          const spread = (li % 2 === 0 ? 30 : 46) * (pData.isWilting ? 1.6 : 1.0);
+          const steps = Math.max(3, Math.floor(leafH / 9));
+          let prevX = originX + side * 5;
+          let prevY = groundY;
+          for (let st = 1; st <= steps; st++) {
+            const u = st / steps;
+            const px = originX + side * (5 + spread * u * u) + flutter * 30 * u * u;
+            const py = groundY - leafH * Math.sin(u * Math.PI * 0.42) / Math.sin(Math.PI * 0.42) + (pData.isWilting ? u * u * leafH * 0.35 : 0);
+            const rot = Math.atan2(px - prevX, prevY - py);
+            const ca = Math.cos(rot);
+            const sa = Math.sin(rot);
+            const w = 2.2 * (1 - u * 0.6);
+            glyphs.push({ x: px - ca * w, y: py - sa * w, char: "|", fg: cStem, size: 13, rot });
+            glyphs.push({ x: px + ca * w, y: py + sa * w, char: "|", fg: cStemDark, size: 13, rot });
+            prevX = px;
+            prevY = py;
           }
-          glyphs.push({ x: originX + side * 16, y: groundY - leafH, char: "n", fg: cStem, size: 13 });
         });
       } else {
         leaves.forEach(leaf => {
-          const t = leaf.y / Math.max(1, shootH);
-          const nIdx = Math.min(nodes.length - 1, Math.floor(t * (nodes.length - 1)));
-          const lx = originX + nodes[nIdx].x;
+          const n = nodeAt(leaf.y);
+          const lx = originX + n.x;
           const lyScreen = groundY - leaf.y;
           const lScale = leaf.scale || 1.0;
           const mat = leaf.maturity !== undefined ? leaf.maturity : 1.0;
+          const theta = -leaf.side * (0.10 + leaf.tilt) + flutter;
 
           // Nascent bud stage: leaf has just emerged from apical meristem
           if (mat < 0.35 && !leaf.isWilted) {
-            const budChar = leaf.side < 0 ? "'" : "`";
-            glyphs.push({ x: lx + leaf.side * 4, y: lyScreen - 2, char: budChar, fg: cStem, size: 10 });
+            leafPush(lx, lyScreen, theta, leaf.side * 4, -2, leaf.side < 0 ? "'" : "`", cStem, 10);
             return;
           }
 
+          const size = Math.max(9, Math.round(13 * lScale));
           if (leaf.isWilted) {
             const wiltPts = [
-              { ox: leaf.side * 8 * lScale, oy: 4 * lScale, ch: "\\" },
-              { ox: leaf.side * 14 * lScale, oy: 10 * lScale, ch: "~" },
-              { ox: leaf.side * 19 * lScale, oy: 16 * lScale, ch: "v" },
-              { ox: leaf.side * 23 * lScale, oy: 22 * lScale, ch: "." }
+              { ox: 8, oy: 4, ch: "\\" },
+              { ox: 14, oy: 10, ch: "~" },
+              { ox: 19, oy: 16, ch: "v" },
+              { ox: 23, oy: 22, ch: "." }
             ];
             wiltPts.forEach((pt, pIdx) => {
-              glyphs.push({ x: lx + pt.ox, y: lyScreen + pt.oy, char: pt.ch, fg: (pIdx < 2 ? cWilted : cDead), size: Math.max(9, Math.round(12 * lScale)) });
+              leafPush(lx, lyScreen, theta, leaf.side * pt.ox * lScale, pt.oy * lScale, pt.ch, (pIdx < 2 ? cWilted : cDead), Math.max(9, Math.round(12 * lScale)));
             });
           } else {
             // Gradual leaf unfurling: petiole extends first, then lamina broadens
-            const pts = [];
-            pts.push({ ox: leaf.side * 6 * lScale, oy: -2 * lScale, ch: leaf.side < 0 ? "/" : "\\" });
-            pts.push({ ox: leaf.side * 12 * lScale, oy: -2 * lScale, ch: "*" });
-            if (mat >= 0.50) {
-              pts.push({ ox: leaf.side * 18 * lScale, oy: -2 * lScale, ch: "%" });
-              pts.push({ ox: leaf.side * 8 * lScale, oy: 5 * lScale, ch: "|" });
-              pts.push({ ox: leaf.side * 14 * lScale, oy: 5 * lScale, ch: "#" });
-            }
-            if (mat >= 0.70) {
-              pts.push({ ox: leaf.side * 8 * lScale, oy: -8 * lScale, ch: "+" });
-              pts.push({ ox: leaf.side * 14 * lScale, oy: -8 * lScale, ch: "+" });
-              pts.push({ ox: leaf.side * 20 * lScale, oy: 4 * lScale, ch: "%" });
-              pts.push({ ox: leaf.side * 24 * lScale, oy: -2 * lScale, ch: "#" });
-            }
+            const pts = [[6, -2, leaf.side < 0 ? "/" : "\\"], [12, -2, "*"]];
+            if (mat >= 0.50) pts.push([18, -2, "%"], [8, 5, "|"], [14, 5, "#"]);
+            if (mat >= 0.70) pts.push([8, -8, "+"], [14, -8, "+"], [20, 4, "%"], [24, -2, "#"]);
             if (mat >= 0.85) {
-              pts.push({ ox: leaf.side * 20 * lScale, oy: -8 * lScale, ch: "+" });
-              pts.push({ ox: leaf.side * 26 * lScale, oy: -8 * lScale, ch: "-" });
-              pts.push({ ox: leaf.side * 26 * lScale, oy: 4 * lScale, ch: "&" });
-              pts.push({ ox: leaf.side * 30 * lScale, oy: -2 * lScale, ch: "#" });
-              pts.push({ ox: leaf.side * 10 * lScale, oy: 12 * lScale, ch: "+" });
-              pts.push({ ox: leaf.side * 16 * lScale, oy: 12 * lScale, ch: "+" });
-              pts.push({ ox: leaf.side * 22 * lScale, oy: 12 * lScale, ch: "+" });
-              pts.push({ ox: leaf.side * 28 * lScale, oy: 12 * lScale, ch: "/" });
+              pts.push([20, -8, "+"], [26, -8, "-"], [26, 4, "&"], [30, -2, "#"],
+                [10, 12, "+"], [16, 12, "+"], [22, 12, "+"], [28, 12, "/"]);
             }
             pts.forEach(pt => {
-              glyphs.push({ x: lx + pt.ox, y: lyScreen + pt.oy, char: pt.ch, fg: cStem, size: Math.max(9, Math.round(13 * lScale)) });
+              leafPush(lx, lyScreen, theta, leaf.side * pt[0] * lScale, pt[1] * lScale, pt[2], cStem, size);
             });
           }
         });
@@ -1137,32 +1472,47 @@
       // 3. SECONDARY BRANCHES (WITH MEMBER SUBCYCLES & CHILD LEAVES)
       // -------------------------------------------------------------
       branches.forEach(b => {
-        const t = b.startY / Math.max(1, shootH);
-        const nIdx = Math.min(nodes.length - 1, Math.floor(t * (nodes.length - 1)));
-        const bx0 = originX + nodes[nIdx].x;
+        const n0 = nodeAt(b.startY);
+        const bx0 = originX + n0.x;
         const by0 = groundY - b.startY;
 
         const isWithering = (b.state === 'withering' || (b.health !== undefined && b.health < 0.35));
         const brStemCol = isWithering ? cDead : cStem;
+        const sinA = Math.sin(b.angle);
+        const cosA = Math.cos(b.angle);
+        const wig = b.wiggle || 0;
+        const amp = 5 * (0.6 + (pData.shapeNoise || 0.7));
 
-        for (let bi = 0; bi <= b.length; bi += 8) {
-          const curvX = bx0 + b.side * (bi * Math.sin(b.angle) + Math.sin(bi * 0.12) * 5);
-          const curvY = by0 - (bi * Math.cos(b.angle));
-          const brChar = isWithering ? ":" : (b.side > 0 ? "/" : "\\");
-          glyphs.push({ x: curvX, y: curvY, char: brChar, fg: brStemCol, size: 13 });
+        // Branch spine with a coherent-noise wiggle; returns point + tangent rotation
+        const along = d => {
+          const w = pData.noise ? pData.noise.noise2(d / 45, wig) : Math.sin(d * 0.12);
+          const sway = flutter * 40 * (d / Math.max(1, b.length)) ** 2;
+          return {
+            x: bx0 + b.side * (d * sinA + w * amp) + sway,
+            y: by0 - d * cosA
+          };
+        };
+
+        let prev = along(0);
+        for (let bi = 8; bi <= b.length; bi += 8) {
+          const p = along(bi);
+          const rot = Math.atan2(p.x - prev.x, prev.y - p.y);
+          glyphs.push({ x: p.x, y: p.y, char: isWithering ? ":" : "|", fg: brStemCol, size: 13, rot });
+          prev = p;
         }
 
         // Child leaves on this branch
         if (b.leaves && b.leaves.length > 0) {
           b.leaves.forEach(bl => {
             if (bl.state === 'dormant' || bl.state === 'dead') return;
-            const bi = b.length * (bl.posAlong || 0.5);
-            const lx = bx0 + b.side * (bi * Math.sin(b.angle) + Math.sin(bi * 0.12) * 5);
-            const ly = by0 - (bi * Math.cos(b.angle));
+            const p = along(b.length * (bl.posAlong || 0.5));
             const isLeafWilted = (bl.state === 'wilting' || isWithering);
             const leafCol = isLeafWilted ? cDead : cStem;
-            const lChar = isLeafWilted ? "~" : (bl.side < 0 ? "<" : ">");
-            glyphs.push({ x: lx + bl.side * 5, y: ly, char: lChar, fg: leafCol, size: 11 });
+            const theta = isLeafWilted ? bl.side * 0.5 : -bl.side * 0.25 + flutter;
+            leafPush(p.x, p.y, theta, bl.side * 5, 0, isLeafWilted ? "~" : (bl.side < 0 ? "<" : ">"), leafCol, 11);
+            if (!isLeafWilted && (bl.scale || 0.7) > 0.6) {
+              leafPush(p.x, p.y, theta, bl.side * 11, -1, bl.side < 0 ? "<" : ">", cStemDark, 10);
+            }
           });
         }
 
@@ -1170,10 +1520,10 @@
         const bFlower = b.flower;
         const bBloom = (bFlower && bFlower.state !== 'dormant' && !bFlower.isDead) ? bFlower.bloom : (b.hasFlower ? bloom * 0.8 : 0);
         if (bBloom > 0.15) {
-          const fEndX = bx0 + b.side * (b.length * Math.sin(b.angle));
-          const fEndY = by0 - (b.length * Math.cos(b.angle));
+          const tip = along(b.length);
           const secFlower = ProceduralFlowerRenderer.generateGlyphs(
-            pType, fEndX, fEndY, fScale * 0.65, bBloom, palette, time, false, (pData.isWilting || isWithering)
+            pType, tip.x, tip.y, fScale * 0.65, bBloom, palette, time, false, (pData.isWilting || isWithering),
+            b.side * b.angle * 0.4 + (pData.windLean || 0), pData.variant
           );
           glyphs.push(...secFlower);
         }
@@ -1190,7 +1540,8 @@
 
       if (pData.isBud) {
         const flowerGlyphs = ProceduralFlowerRenderer.generateGlyphs(
-          pType, tiltX, tiltY, fScale, bloom, palette, time, seedsBlown, pData.isWilting
+          pType, tiltX, tiltY, fScale, bloom, palette, time, seedsBlown, pData.isWilting,
+          tilt * 0.5 + (pData.windLean || 0), pData.variant
         );
         glyphs.push(...flowerGlyphs);
       }
@@ -1203,8 +1554,35 @@
   // 5. PROCEDURAL FLOWER HEAD GEOMETRY ENGINE (GRADUAL BUD-TO-BLOOM MATH)
   // =========================================================================
 
+  const HEAD_ROT_RESPONSE = { hibiscus: 0.25, iris: 0.45, tulip: 0.7, flytrap: 0.6 };
+
   class ProceduralFlowerRenderer {
-    static generateGlyphs(type, cx, cy, scale, bloom, palette, time = 0, seedsBlown = false, isWilting = false) {
+    /**
+     * headRot rotates the whole head (clockwise radians) around its centre so heads nod
+     * with the stem tip and the wind; variant (0..1) gives each individual its own
+     * petal irregularity.
+     */
+    static generateGlyphs(type, cx, cy, scale, bloom, palette, time = 0, seedsBlown = false, isWilting = false, headRot = 0, variant = 0) {
+      const glyphs = this._generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, isWilting, variant);
+      // Row-built heads (hibiscus, iris) read as slanted slabs when rotated far
+      headRot = clamp(headRot * (HEAD_ROT_RESPONSE[type] !== undefined ? HEAD_ROT_RESPONSE[type] : 1.0), -0.4, 0.4);
+      if (headRot) {
+        const pivotY = cy - 22 * scale;
+        const c = Math.cos(headRot);
+        const s = Math.sin(headRot);
+        for (let i = 0; i < glyphs.length; i++) {
+          const g = glyphs[i];
+          const dx = g.x - cx;
+          const dy = g.y - pivotY;
+          g.x = cx + dx * c - dy * s;
+          g.y = pivotY + dx * s + dy * c;
+          g.rot = (g.rot || 0) + headRot;
+        }
+      }
+      return glyphs;
+    }
+
+    static _generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, isWilting, variant) {
       const glyphs = [];
       const fPalette = palette.flowers[type] || palette.flowers.sunflower;
       const cStem = palette.stem;
@@ -1245,6 +1623,7 @@
       // STAGE 3 & 4: HALF-BLOOM & FULL ANTHESIS (bloom >= 0.45)
       // Mathematical expansion factor b_eff: 0.0 at bloom=0.45, 1.0 at bloom=1.0
       const bEff = smoothstep(0.45, 1.0, bloom);
+      this._variant = variant || 0;
 
       switch (type) {
         case 'sunflower':
@@ -1333,13 +1712,16 @@
         const maxLen = 38 * s * petalProgress;
         const glyphsChoice = ["(", ")", "{", "}", "~", "S", "s", "%", "&"];
 
+        const vPhase = (this._variant || 0) * 40;
         for (let i = 0; i < numPetals; i++) {
           const baseAngle = (i / numPetals) * 2 * Math.PI;
           const layers = [1.0, 0.78];
+          // Each individual's ray petals differ in length (smooth, non-repeating pattern)
+          const irregular = 1.0 + 0.16 * Math.sin(i * 2.7 + vPhase) + 0.08 * Math.sin(i * 5.3 + vPhase * 1.7);
 
           layers.forEach((layerScale, lIdx) => {
             const angle = baseAngle + (lIdx * Math.PI / numPetals);
-            const petalReach = maxLen * layerScale;
+            const petalReach = maxLen * layerScale * irregular;
 
             for (let seg = 1; seg <= 4; seg++) {
               const segFrac = seg / 4.0;
@@ -1359,7 +1741,8 @@
                 y: py,
                 char: ch,
                 fg: col,
-                size: Math.max(10, Math.round((11 + seg * 1.8) * s))
+                size: Math.max(10, Math.round((11 + seg * 1.8) * s)),
+                rot: angle + Math.PI / 2
               });
             }
           });
@@ -1487,9 +1870,9 @@
           const dist = step * 11 * s * b;
           const px = cx + Math.cos(pAngle) * dist;
           const py = fcy + Math.sin(pAngle) * dist + (isWilting ? step * 2 * s : 0);
-          const ch = step >= 5 ? '!' : (plume > 0 ? '/' : '\\');
+          const ch = step >= 5 ? '!' : '|';
           const col = isWilting ? '#6e5436' : (step >= 4 ? pal.brush : pal.brushDark);
-          out.push({ x: px, y: py, char: ch, fg: col, size: 14 * s });
+          out.push({ x: px, y: py, char: ch, fg: col, size: 14 * s, rot: pAngle + Math.PI / 2 });
         }
       }
     }
@@ -1515,7 +1898,7 @@
 
         for (let p = 0; p < petalCount; p++) {
           const ang = (p / petalCount) * 2 * Math.PI + (tier * 0.4);
-          const r = tierR * (0.85 + 0.15 * Math.sin(p * 3 + tier));
+          const r = tierR * (0.85 + 0.15 * Math.sin(p * 3 + tier + (this._variant || 0) * 30));
           const px = cx + Math.cos(ang) * r;
           const py = fcy + Math.sin(ang) * (r * 0.75) + (isWilting ? 6 * s : 0);
           const ch = chars[(tier * 2 + p) % chars.length];
@@ -1524,7 +1907,8 @@
             y: py,
             char: ch,
             fg: col,
-            size: Math.max(10, Math.round((11 + tier * 1.2) * s))
+            size: Math.max(10, Math.round((11 + tier * 1.2) * s)),
+            rot: ang + Math.PI / 2
           });
         }
       }
@@ -1547,7 +1931,7 @@
           const px = cx + Math.cos(ang) * dist;
           const py = fcy + Math.sin(ang) * dist + (isWilting ? step * 1.5 * s : 0);
           const ch = step === 5 ? '*' : (step >= 3 ? '^' : '+');
-          out.push({ x: px, y: py, char: ch, fg: isWilting ? '#9e852a' : pal.petal, size: 14 * s });
+          out.push({ x: px, y: py, char: ch, fg: isWilting ? '#9e852a' : pal.petal, size: 14 * s, rot: ang + Math.PI / 2 });
         }
       }
     }
@@ -1646,7 +2030,7 @@
       if (seedsBlown) {
         for (let i = 0; i < 6; i++) {
           const ang = (i / 6) * 2 * Math.PI;
-          out.push({ x: cx + Math.cos(ang) * 16 * s, y: fcy + Math.sin(ang) * 16 * s, char: "'", fg: pal.seed, size: 12 * s });
+          out.push({ x: cx + Math.cos(ang) * 16 * s, y: fcy + Math.sin(ang) * 16 * s, char: "'", fg: pal.seed, size: 12 * s, rot: ang + Math.PI / 2 });
         }
         return;
       }
@@ -1660,7 +2044,7 @@
         const px = cx + Math.cos(ang) * r;
         const py = fcy + Math.sin(ang) * r;
         const ch = (i % 3 === 0) ? '*' : ((i % 3 === 1) ? '·' : "'");
-        out.push({ x: px, y: py, char: ch, fg: pal.seed, size: 13 * s });
+        out.push({ x: px, y: py, char: ch, fg: pal.seed, size: 13 * s, rot: ang + Math.PI / 2 });
       }
     }
 
@@ -1861,7 +2245,250 @@
   }
 
   // =========================================================================
-  // 6. LIVING MEADOW GRASS (LIFECYCLE: SPROUT -> GROW -> WILT -> DIE -> RESEED)
+  // 6. GLYPH RENDERING (CANVAS SPRITE ATLAS + ROTATION) & PLAIN-TEXT RASTER
+  // =========================================================================
+
+  const FONT_STACK = '"Courier New", Consolas, monospace';
+
+  /**
+   * Glyph sprite atlas. Each (char, colour, device-pixel size) is rasterised once with
+   * fillText into a shared atlas page and then blitted with drawImage. Re-assigning
+   * ctx.font per glyph and drawing rotated text with fillText are both slow paths;
+   * blitting cached sprites keeps rotated glyphs as cheap as upright ones.
+   */
+  class GlyphAtlas {
+    constructor(options = {}) {
+      // One large page keeps every blit on the same texture so the GPU can batch them
+      this.pageSize = options.pageSize || 2048;
+      this.maxPages = options.maxPages || 2;
+      this.font = options.font || FONT_STACK;
+      this.sprites = new Map();
+      this.pages = [];
+      this._newPage();
+    }
+
+    static isSupported() {
+      return typeof OffscreenCanvas !== 'undefined' ||
+        (typeof document !== 'undefined' && typeof document.createElement === 'function');
+    }
+
+    _createCanvas(w, h) {
+      if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      return c;
+    }
+
+    _newPage() {
+      const canvas = this._createCanvas(this.pageSize, this.pageSize);
+      const ctx = canvas.getContext('2d');
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      this.page = { canvas, ctx, x: 0, y: 0, rowH: 0 };
+      this.pages.push(this.page);
+    }
+
+    clear() {
+      this.sprites.clear();
+      this.pages = [];
+      this._newPage();
+    }
+
+    /**
+     * Sprites are rasterised at bucketed sizes (even device pixels above 14px) and scaled
+     * to the exact size when drawn, which bounds the number of sprites per colour.
+     */
+    static bucket(px) {
+      return px <= 14 ? px : Math.round(px / 2) * 2;
+    }
+
+    get(char, color, px) {
+      const key = char + '\u0000' + color + '\u0000' + px;
+      let sprite = this.sprites.get(key);
+      if (sprite) return sprite;
+
+      let page = this.page;
+      const font = `${px}px ${this.font}`;
+      page.ctx.font = font;
+      const w = Math.ceil(page.ctx.measureText(char).width) + 4;
+      const h = Math.ceil(px * 1.3) + 4;
+
+      if (page.x + w > this.pageSize) {
+        page.x = 0;
+        page.y += page.rowH;
+        page.rowH = 0;
+      }
+      if (page.y + h > this.pageSize) {
+        // Generational flush: when every page is full, start over (sprites are cheap to rebuild)
+        if (this.pages.length >= this.maxPages) this.clear();
+        else this._newPage();
+        page = this.page;
+        page.ctx.font = font;
+      }
+
+      page.ctx.fillStyle = color;
+      page.ctx.fillText(char, page.x + w / 2, page.y + h / 2);
+      sprite = { canvas: page.canvas, sx: page.x, sy: page.y, w, h };
+      page.x += w;
+      page.rowH = Math.max(page.rowH, h);
+      this.sprites.set(key, sprite);
+      return sprite;
+    }
+  }
+
+  class GlyphRenderer {
+    constructor(options = {}) {
+      this.atlas = (options.atlas !== false && GlyphAtlas.isSupported()) ? new GlyphAtlas(options) : null;
+    }
+
+    static get shared() {
+      if (!GlyphRenderer._shared) GlyphRenderer._shared = new GlyphRenderer();
+      return GlyphRenderer._shared;
+    }
+
+    /** Device-pixel ratio implied by the context's current transform. */
+    static scaleOf(ctx) {
+      if (ctx && typeof ctx.getTransform === 'function') {
+        const m = ctx.getTransform();
+        return Math.hypot(m.a, m.b) || 1;
+      }
+      return 1;
+    }
+
+    /**
+     * Draw glyphs (CSS-pixel coordinates). Leaves the context with transform
+     * (dpr, 0, 0, dpr, 0, 0) and globalAlpha 1.
+     */
+    draw(ctx, glyphs, dpr = GlyphRenderer.scaleOf(ctx)) {
+      if (!ctx || !glyphs || glyphs.length === 0) return;
+      if (!this.atlas || typeof ctx.setTransform !== 'function') {
+        this._drawText(ctx, glyphs);
+        return;
+      }
+
+      let alpha = 1;
+      ctx.globalAlpha = 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      let identity = true;
+
+      for (let i = 0; i < glyphs.length; i++) {
+        const g = glyphs[i];
+        const a = g.alpha !== undefined ? g.alpha : 1;
+        if (a <= 0.01) continue;
+        if (a !== alpha) {
+          ctx.globalAlpha = a;
+          alpha = a;
+        }
+
+        const exact = Math.max(4, g.size * dpr);
+        const px = GlyphAtlas.bucket(Math.round(exact));
+        const sp = this.atlas.get(g.char, g.fg, px);
+        const k = exact / px;
+        const dw = sp.w * k;
+        const dh = sp.h * k;
+        const rot = g.rot || 0;
+
+        if (rot > -0.02 && rot < 0.02) {
+          if (!identity) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            identity = true;
+          }
+          // Whole-pixel destinations keep upright glyphs crisp
+          ctx.drawImage(sp.canvas, sp.sx, sp.sy, sp.w, sp.h,
+            Math.round(g.x * dpr - dw / 2), Math.round(g.y * dpr - dh / 2), dw, dh);
+        } else {
+          const c = Math.cos(rot);
+          const s = Math.sin(rot);
+          ctx.setTransform(c, s, -s, c, g.x * dpr, g.y * dpr);
+          identity = false;
+          ctx.drawImage(sp.canvas, sp.sx, sp.sy, sp.w, sp.h, -dw / 2, -dh / 2, dw, dh);
+        }
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Fallback for environments without an atlas (e.g. minimal mock contexts)
+    _drawText(ctx, glyphs) {
+      if (typeof ctx.fillText !== 'function') return;
+      if (typeof ctx.save === 'function') ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      let font = '';
+      let fill = '';
+      for (let i = 0; i < glyphs.length; i++) {
+        const g = glyphs[i];
+        const f = `${Math.round(g.size)}px ${FONT_STACK}`;
+        if (f !== font) { ctx.font = f; font = f; }
+        if (g.fg !== fill) { ctx.fillStyle = g.fg; fill = g.fg; }
+        ctx.globalAlpha = g.alpha !== undefined ? g.alpha : 1;
+        ctx.fillText(g.char, g.x, g.y);
+      }
+      if (typeof ctx.restore === 'function') ctx.restore();
+    }
+  }
+
+  /**
+   * Rasterise glyphs into a character grid for terminals, READMEs and chat.
+   * Fits the drawing into cols x rows while correcting for the ~1:2 aspect of
+   * terminal character cells, and maps rotated line glyphs to the nearest of | / - \.
+   */
+  class TextRasterizer {
+    static orient(char, rot) {
+      const base = { '|': 0, '!': 0, '/': Math.PI / 4, '-': Math.PI / 2, '~': Math.PI / 2, '\\': -Math.PI / 4 }[char];
+      if (base === undefined || !rot) return char;
+      let a = (base + rot) % Math.PI;
+      if (a < 0) a += Math.PI;
+      const idx = Math.round(a / (Math.PI / 4)) % 4;
+      if (char === '~' && idx === 2) return '~';
+      if (char === '!' && idx === 0) return '!';
+      return ['|', '/', '-', '\\'][idx];
+    }
+
+    static rasterize(glyphs, cols = 40, rows = 35, options = {}) {
+      const aspect = options.aspect || 0.5; // cell width / cell height
+      const grid = Array.from({ length: rows }, () => Array(cols).fill(' '));
+      const visible = glyphs.filter(g => g.char && g.char.trim() !== '' && (g.alpha === undefined || g.alpha > 0.2));
+      if (visible.length === 0) return grid.map(r => r.join('')).join('\n');
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      visible.forEach(g => {
+        minX = Math.min(minX, g.x); maxX = Math.max(maxX, g.x);
+        minY = Math.min(minY, g.y); maxY = Math.max(maxY, g.y);
+      });
+      const cellH = Math.max(options.minCell || 10, (maxY - minY + 1) / rows, (maxX - minX + 1) / (cols * aspect));
+      const cellW = cellH * aspect;
+      const offX = (cols * cellW - (maxX - minX)) / 2;
+      const offY = rows * cellH - (maxY - minY) - cellH * 0.5; // sit on the bottom row
+
+      visible.forEach(g => {
+        const c = Math.floor((g.x - minX + offX) / cellW);
+        const r = Math.floor((g.y - minY + offY) / cellH);
+        if (r >= 0 && r < rows && c >= 0 && c < cols) {
+          grid[r][c] = TextRasterizer.orient(g.char.length > 1 ? g.char[1] || g.char[0] : g.char, g.rot);
+        }
+      });
+      return grid.map(r => r.join('').replace(/\s+$/, '')).join('\n');
+    }
+  }
+
+  /**
+   * Spatially coherent wind: gust fronts travel across the meadow so neighbouring plants
+   * bend together and the wave visibly rolls from one side to the other.
+   */
+  class WindField {
+    constructor(seed = 7) {
+      this.noise = new SimplexNoise(seed);
+    }
+    sample(x, t) {
+      return clamp(this.noise.fbm2(x * 0.0022 - t * 0.32, t * 0.07, 2) * 1.4, -1, 1);
+    }
+  }
+
+  // =========================================================================
+  // 7. LIVING MEADOW GRASS (LIFECYCLE: SPROUT -> GROW -> WILT -> DIE -> RESEED)
   // =========================================================================
 
   class GrassTuft {
@@ -1932,7 +2559,7 @@
       }
     }
 
-    generateGlyphs(time = 0, windStrength = 0.5, pointer = null, palette = null) {
+    generateGlyphs(time = 0, windStrength = 0.5, pointer = null, palette = null, gust = 0) {
       const glyphs = [];
       const gy = this.groundY;
       const gx = this.x;
@@ -1947,7 +2574,7 @@
         }
       }
 
-      const windSway = Math.sin(time * 2.4 + gx * 0.06) * (windStrength * 7);
+      const windSway = (Math.sin(time * 2.4 + gx * 0.06) * (0.6 + 0.4 * Math.abs(gust)) + gust * 1.2) * (windStrength * 7);
 
       if (this.phase === 'sprout') {
         // STAGE 1: SPROUT
@@ -1971,18 +2598,20 @@
           const bCurve = this.bladeCurves[b] * 20;
           const steps = Math.max(2, Math.floor(bh / 8));
 
+          let prevX = bx;
           for (let s = 1; s <= steps; s++) {
             const st = s / steps;
             const sy = gy - (s * 8);
             const sway = (windSway + pointerDeflection) * st * st + (bCurve * st);
-            const ch = st > 0.7 ? (sway > 0 ? "/" : "\\") : "|";
             glyphs.push({
               x: bx + sway,
               y: sy,
-              char: ch,
+              char: "|",
               fg: st > 0.5 ? colBlade : colBladeDark,
-              size: Math.round(11 + st * 2)
+              size: Math.round(11 + st * 2),
+              rot: Math.atan2(bx + sway - prevX, 8)
             });
+            prevX = bx + sway;
           }
         }
       } else if (this.phase === 'wilt') {
@@ -1998,18 +2627,22 @@
           const droop = (this.bladeCurves[b] >= 0 ? 1 : -1) * (14 + wiltProgress * 16);
           const steps = Math.max(2, Math.floor(bh / 8));
 
+          let prevX = bx;
+          let prevY = gy;
           for (let s = 1; s <= steps; s++) {
             const st = s / steps;
             const sy = gy - (s * 6) + (st * st * 8);
             const sway = (windSway * 0.35) * st + (droop * st);
-            const ch = st > 0.6 ? "~" : (st > 0.3 ? "\\" : "|");
             glyphs.push({
               x: bx + sway,
               y: sy,
-              char: ch,
+              char: st > 0.75 ? "~" : "|",
               fg: st > 0.5 ? colStraw : colWilt,
-              size: 11
+              size: 11,
+              rot: st > 0.75 ? 0 : Math.atan2(bx + sway - prevX, Math.max(0.5, prevY - sy))
             });
+            prevX = bx + sway;
+            prevY = sy;
           }
         }
       } else {
@@ -2026,8 +2659,15 @@
   }
 
   // =========================================================================
-  // 7. THE ASCIIPLANT CLASS
+  // 8. THE ASCIIPLANT CLASS
   // =========================================================================
+
+  const SPECIES = ['sunflower', 'hibiscus', 'iris', 'thistle', 'marigold', 'daffodil', 'rose', 'dandelion', 'tulip', 'flytrap'];
+
+  // Biological-age landmarks (in growth units n: 0 -> 1 grows, 1 -> 21 mature prime)
+  const PRIME_END = 21.0;
+  const LIFE_END = 23.5;
+  const BASE_AGING_RATE = 0.025; // biological age per second at 1x for an average plant
 
   class AsciiPlant {
     constructor(options = {}) {
@@ -2042,7 +2682,6 @@
       this.paletteName = options.palette || 'botanical';
       this.interactive = options.interactive !== false;
       this.pointerMode = options.pointerMode || 'reach';
-      this.metabolicRate = options.metabolicRate !== undefined ? options.metabolicRate : (0.80 + Math.random() * 0.40);
 
       this.simulator = new BotanicalSimulator({
         type: this.type,
@@ -2050,14 +2689,38 @@
         height: this.height,
         curvature: this.curvature,
         leafDensity: this.leafDensity,
-        branching: this.branching
+        branching: this.branching,
+        genome: options.genome
       });
+      // Metabolic rate is inherited (genome vigour) unless explicitly overridden
+      this.metabolicRate = options.metabolicRate !== undefined ? options.metabolicRate : this.genome.vigor;
 
       this.pointer = { x: 0, y: 0, active: false };
       this.growthBoost = 0.0;
       this.vitality = 1.0;
       this.seedsBlown = false;
       this.seedRegenTimer = 0.0;
+      this.clock = 0.0;
+    }
+
+    get genome() {
+      return this.simulator.genome;
+    }
+
+    /** Replace (part of) the genome, e.g. from the Parametric Lab; keeps age & seed. */
+    setGenome(traits) {
+      const next = traits instanceof Genome ? traits : new Genome(Object.assign(this.genome.toJSON(), traits));
+      this.simulator.applyGenome(next);
+      this.metabolicRate = next.vigor;
+    }
+
+    /**
+     * Fast-forward member subcycles (leaf unfurling, branch elongation) at the current
+     * age, so a freshly (re)generated specimen appears as it would have grown.
+     */
+    settle(seconds = 12, step = 0.25) {
+      for (let t = 0; t < seconds; t += step) this.simulator.updateMembers(step, 1.0, this.age);
+      if (this.bloom !== null) this.setBloom(this.bloom);
     }
 
     feed(amount = 0.20) {
@@ -2067,19 +2730,36 @@
     }
 
     update(dt, timeSpeed = 1.0) {
+      this.clock += dt * timeSpeed;
       this.simulator.updateMembers(dt, timeSpeed, this.age);
     }
 
-    reseed(newSeed = Math.floor(Math.random() * 1000000)) {
+    /**
+     * Biological age gained over dt seconds of garden time. Growth speed wanders with
+     * noise; the life factor stretches the mature prime (long-lived individuals stay in
+     * their prime for longer) without moving the biological landmarks themselves.
+     */
+    agingDelta(dt, timeSpeed = 1.0) {
+      const longevity = (this.age >= 1.0 && this.age < PRIME_END) ? 1.0 / this.genome.lifeFactor : 1.0;
+      return dt * timeSpeed * BASE_AGING_RATE * (this.metabolicRate || 1.0) * this.simulator.growthNoise(this.clock) * longevity;
+    }
+
+    /**
+     * Restart this individual from a new seed. With { inherit: true } the new genome is a
+     * mutated copy of the current one (self-seeding) instead of an unrelated random one.
+     */
+    reseed(newSeed = Math.floor(Math.random() * 1000000), options = {}) {
+      const genome = options.genome || (options.inherit ? this.genome.mutate(newSeed) : Genome.random(this.type, newSeed));
       this.seed = newSeed;
-      this.simulator.reseedGenetics(newSeed);
+      this.simulator.reseedGenetics(newSeed, genome);
       this.age = 0.04;
       this.bloom = null;
-      this.metabolicRate = 0.80 + Math.random() * 0.40;
+      this.metabolicRate = genome.vigor;
       this.growthBoost = 0.0;
       this.vitality = 1.0;
       this.seedsBlown = false;
       this.seedRegenTimer = 0.0;
+      this.clock = 0.0;
     }
 
     setAge(val) {
@@ -2101,8 +2781,8 @@
       }
       const gAge = Math.min(1.0, this.age);
       let b = smoothstep(0.42, 0.88, gAge);
-      if (this.age > 21.0) {
-        const sen = clamp((this.age - 21.0) / 2.5, 0.0, 1.0);
+      if (this.age > PRIME_END) {
+        const sen = clamp((this.age - PRIME_END) / 2.5, 0.0, 1.0);
         b = Math.max(0.0, b * (1.0 - sen * 0.65));
       }
       return b;
@@ -2128,11 +2808,12 @@
       if (PALETTES[name]) this.paletteName = name;
     }
 
+    /** This individual's colours: the base palette tinted by its genome. */
     getPalette() {
-      return PALETTES[this.paletteName] || PALETTES.botanical;
+      return this.genome.tintPalette(PALETTES[this.paletteName] || PALETTES.botanical);
     }
 
-    generateGlyphs(originX, groundY, time = 0, windStrength = 0.5) {
+    generateGlyphs(originX, groundY, time = 0, windStrength = 0.5, gust = 0) {
       let pointerDist = null;
       if (this.pointer.active && this.pointerMode !== 'none') {
         pointerDist = {
@@ -2143,77 +2824,70 @@
         };
       }
 
-      const pData = this.simulator.simulate(this.age, this.bloom, time, windStrength, pointerDist);
+      const pData = this.simulator.simulate(this.age, this.bloom, time, windStrength, pointerDist, gust);
       const palette = this.getPalette();
       return BotanicalArchitect.generatePlantGlyphs(pData, originX, groundY, palette, this.seed, time, this.seedsBlown);
     }
 
     /**
-     * Ultra-fast canvas render: ZERO per-glyph shadowBlur calls!
-     * Runs locked at 60-120 FPS on all devices.
+     * Render through the shared glyph atlas (rotated glyphs, no per-glyph font changes).
+     * options.bloom adds a cheap downscaled glow pass over the whole canvas.
      */
     renderToCanvas(ctx, originX, groundY, time = 0, windStrength = 0.5, options = {}) {
-      const glyphs = this.generateGlyphs(originX, groundY, time, windStrength);
+      const glyphs = this.generateGlyphs(originX, groundY, time, windStrength, options.gust || 0);
+      GlyphRenderer.shared.draw(ctx, glyphs);
 
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      // Fast single-pass character render without expensive per-glyph shadowBlur
-      glyphs.forEach(g => {
-        ctx.font = `${Math.round(g.size)}px "Courier New", Consolas, monospace`;
-        ctx.fillStyle = g.fg;
-        ctx.fillText(g.char, g.x, g.y);
-      });
-
-      ctx.restore();
-
-      // Optional subtle bloom pass if requested
       if (options.bloom && ctx && ctx.canvas) {
-        const c = ctx.canvas;
-        if (!this._bloomCanvas) {
-          this._bloomCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
-        }
-        if (this._bloomCanvas) {
-          const bw = Math.max(1, Math.floor(c.width / 3));
-          const bh = Math.max(1, Math.floor(c.height / 3));
-          if (this._bloomCanvas.width !== bw || this._bloomCanvas.height !== bh) {
-            this._bloomCanvas.width = bw;
-            this._bloomCanvas.height = bh;
-          }
-          const bCtx = this._bloomCanvas.getContext('2d');
-          if (bCtx) {
-            bCtx.clearRect(0, 0, bw, bh);
-            if (typeof bCtx.filter !== 'undefined') bCtx.filter = 'blur(2.5px)';
-            bCtx.drawImage(c, 0, 0, bw, bh);
-            if (typeof bCtx.filter !== 'undefined') bCtx.filter = 'none';
-
-            ctx.save();
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = 0.35;
-            ctx.drawImage(this._bloomCanvas, 0, 0, c.width, c.height);
-            ctx.restore();
-          }
-        }
+        if (!this._bloom) this._bloom = new BloomPass();
+        this._bloom.apply(ctx, ctx.canvas.width, ctx.canvas.height);
       }
     }
 
     toPlainText(cols = 40, rows = 35) {
-      const grid = Array.from({ length: rows }, () => Array(cols).fill(' '));
-      const glyphs = this.generateGlyphs(cols * 5, rows * 10, 0, 0);
-      glyphs.forEach(g => {
-        const c = Math.floor(g.x / 10);
-        const r = Math.floor(g.y / 10);
-        if (r >= 0 && r < rows && c >= 0 && c < cols) {
-          grid[r][c] = g.char[0] || '*';
-        }
-      });
-      return grid.map(row => row.join('')).join('\n');
+      const glyphs = this.generateGlyphs(0, 0, 0, 0);
+      return TextRasterizer.rasterize(glyphs, cols, rows);
+    }
+  }
+
+  /**
+   * Screen-space glow: blur a 1/3-scale copy of the frame and add it back with 'lighter'.
+   * One blur per frame regardless of glyph count (vs. thousands with shadowBlur).
+   */
+  class BloomPass {
+    constructor() {
+      this.canvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+      this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
+    }
+
+    /** width/height are the source canvas size in device pixels. */
+    apply(ctx, width, height, strength = 1.0) {
+      if (!this.ctx || !ctx || !ctx.canvas) return;
+      const bw = Math.max(10, Math.floor(width / 3));
+      const bh = Math.max(10, Math.floor(height / 3));
+      if (this.canvas.width !== bw || this.canvas.height !== bh) {
+        this.canvas.width = bw;
+        this.canvas.height = bh;
+      }
+      const b = this.ctx;
+      b.clearRect(0, 0, bw, bh);
+      if (typeof b.filter !== 'undefined') b.filter = 'blur(2.5px)';
+      b.drawImage(ctx.canvas, 0, 0, bw, bh);
+      if (typeof b.filter !== 'undefined') b.filter = 'none';
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'lighter';
+      // Tier 1: luminous inner core. Tier 2: soft atmospheric halo.
+      ctx.globalAlpha = 0.38 * strength;
+      ctx.drawImage(this.canvas, 0, 0, width, height);
+      ctx.globalAlpha = 0.16 * strength;
+      ctx.drawImage(this.canvas, -6, -6, width + 12, height + 12);
+      ctx.restore();
     }
   }
 
   // =========================================================================
-  // 7. THE ASCIIGARDEN CLASS (60 FPS ENGINE WITH SCREEN-SPACE BLOOM PASS)
+  // 9. THE ASCIIGARDEN CLASS (LIVING, SELF-SEEDING MEADOW)
   // =========================================================================
 
   class AsciiGarden {
@@ -2223,26 +2897,60 @@
       this.plants = [];
       this.windStrength = options.wind !== undefined ? options.wind : 0.6;
       this.windTime = 0;
-      this.particles = []; // Floating pollen, parachute seeds, sunlight motes
+      this.wind = new WindField(options.windSeed || 7);
+      this.particles = []; // Floating pollen, seeds, petals, sunlight motes
       this.isRunning = false;
       this.paletteName = options.palette || 'botanical';
       this.pointer = { x: -999, y: -999, active: false };
+      this.renderer = options.renderer || GlyphRenderer.shared;
+      this.bloomPass = new BloomPass();
+      this.bloom = options.bloom !== false;
+
+      // Lifecycle model:
+      //  'reproduce' (default) — flowers set seed, seeds drift and germinate in new spots,
+      //                          dead plants are removed: a self-sustaining population.
+      //  'respawn'             — a dead plant is reborn in place (single-specimen embeds).
+      this.lifecycle = options.lifecycle || 'reproduce';
+      this.seedGermination = options.seedGermination !== undefined ? options.seedGermination : 0.12;
+      this.minSpacing = options.minSpacing !== undefined ? options.minSpacing : 28;
+      this.maxPlants = options.maxPlants || null;   // default derived from width
+      this.minPlants = options.minPlants !== undefined ? options.minPlants : null;
+      this.maxSpeciesShare = options.maxSpeciesShare !== undefined ? options.maxSpeciesShare : 0.3;
+      // Seeds of random species occasionally blow in from outside the meadow (diversity)
+      this.immigration = options.immigration !== false;
+      this._immigrationTimer = 20 + Math.random() * 20;
+
+      this.reducedMotion = options.reducedMotion !== undefined
+        ? !!options.reducedMotion
+        : (typeof window !== 'undefined' && typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
       // Time control engine
       this.timeSpeed = options.timeSpeed !== undefined ? options.timeSpeed : 1.0; // 0 = paused, 1 = normal, 3 = fast
       this.onDandelionBlow = null;
       this.onSeedGerminate = null;
-
-      // Screen-space downscaled bloom canvas (for 60 FPS silky bloom with ZERO shadowBlur lag!)
-      this.bloomCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
-      this.bloomCtx = this.bloomCanvas ? this.bloomCanvas.getContext('2d') : null;
+      this.onPlantDeath = null;
+      this.onPlantReseed = null;
 
       // Living Meadow Grass along the soil line
       this.grass = [];
       this.enableGrass = options.grass !== false;
 
+      this._listeners = [];
       this._setupEvents();
       this.resize();
+    }
+
+    get groundY() {
+      return (this.cssHeight || 600) - 50;
+    }
+
+    get capacity() {
+      return this.maxPlants || clamp(Math.floor((this.cssWidth || 800) / 120), 4, 16);
+    }
+
+    get floor() {
+      return this.minPlants !== null ? this.minPlants : clamp(Math.floor((this.cssWidth || 800) / 240), 2, 8);
     }
 
     resize() {
@@ -2251,20 +2959,18 @@
         ? this.canvas.getBoundingClientRect()
         : { width: this.canvas.width || 800, height: this.canvas.height || 600 };
       const dpr = typeof window !== 'undefined' ? Math.min(2, window.devicePixelRatio || 1) : 1;
-      this.canvas.width = (rect.width || 800) * dpr;
-      this.canvas.height = (rect.height || 600) * dpr;
-      if (this.ctx && typeof this.ctx.scale === 'function') this.ctx.scale(dpr, dpr);
+      this.dpr = dpr;
       this.cssWidth = rect.width || 800;
       this.cssHeight = rect.height || 600;
+      this.canvas.width = Math.round(this.cssWidth * dpr);
+      this.canvas.height = Math.round(this.cssHeight * dpr);
+      if (this.ctx && typeof this.ctx.setTransform === 'function') this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      else if (this.ctx && typeof this.ctx.scale === 'function') this.ctx.scale(dpr, dpr);
 
-      // Downscaled bloom buffer (1/3 scale for instantaneous blur pass)
-      if (this.bloomCanvas) {
-        this.bloomW = Math.max(10, Math.floor(this.cssWidth / 3));
-        this.bloomH = Math.max(10, Math.floor(this.cssHeight / 3));
-        this.bloomCanvas.width = this.bloomW;
-        this.bloomCanvas.height = this.bloomH;
+      this._soilGlyphs = [];
+      for (let gx = 0; gx < this.cssWidth; gx += 16) {
+        this._soilGlyphs.push({ x: gx, y: this.groundY + 12, char: '-', fg: '#225528', size: 12 });
       }
-
       this._initGrass();
     }
 
@@ -2272,7 +2978,7 @@
       this.grass = [];
       if (!this.enableGrass) return;
       const w = this.cssWidth || 800;
-      const gy = this.cssHeight - 50;
+      const gy = this.groundY;
       const tuftSpacing = 22;
       const count = Math.max(1, Math.floor(w / tuftSpacing));
       for (let i = 0; i < count; i++) {
@@ -2287,13 +2993,22 @@
       return PALETTES[this.paletteName] || PALETTES.botanical;
     }
 
+    _listen(target, type, fn) {
+      target.addEventListener(type, fn);
+      this._listeners.push([target, type, fn]);
+    }
+
     _setupEvents() {
       if (!this.canvas || typeof this.canvas.addEventListener !== 'function') return;
-
-      this.canvas.addEventListener('mousemove', e => {
+      const local = e => {
         const rect = typeof this.canvas.getBoundingClientRect === 'function' ? this.canvas.getBoundingClientRect() : { left: 0, top: 0 };
-        this.pointer.x = e.clientX - rect.left;
-        this.pointer.y = e.clientY - rect.top;
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      };
+
+      this._listen(this.canvas, 'mousemove', e => {
+        const p = local(e);
+        this.pointer.x = p.x;
+        this.pointer.y = p.y;
         this.pointer.active = true;
 
         if (Math.random() < 0.25) {
@@ -2310,21 +3025,26 @@
         }
       });
 
-      this.canvas.addEventListener('mouseleave', () => {
+      this._listen(this.canvas, 'mouseleave', () => {
         this.pointer.active = false;
       });
 
       // Click to blow dandelion seeds if clicking near a dandelion head!
-      this.canvas.addEventListener('click', e => {
-        const rect = typeof this.canvas.getBoundingClientRect === 'function' ? this.canvas.getBoundingClientRect() : { left: 0, top: 0 };
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
-        this.checkDandelionBlow(clickX, clickY);
+      this._listen(this.canvas, 'click', e => {
+        const p = local(e);
+        this.checkDandelionBlow(p.x, p.y);
       });
 
-      if (typeof window !== 'undefined') {
-        window.addEventListener('resize', () => this.resize());
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        this._listen(window, 'resize', () => this.resize());
       }
+    }
+
+    /** Stop the loop and detach every listener (call when removing the canvas). */
+    destroy() {
+      this.stop();
+      this._listeners.forEach(([t, type, fn]) => t.removeEventListener(type, fn));
+      this._listeners = [];
     }
 
     /**
@@ -2332,9 +3052,9 @@
      */
     checkDandelionBlow(clickX, clickY) {
       let hit = false;
-      const groundY = this.cssHeight - 50;
+      const groundY = this.groundY;
       this.plants.forEach(({ x: plantX, plant }) => {
-        if (plant.type === 'dandelion' && !plant.seedsBlown && (plant.effectiveBloom > 0.35 || plant.age > 0.50)) {
+        if (plant.type === 'dandelion' && !plant.seedsBlown && plant.age < PRIME_END && (plant.effectiveBloom > 0.35 || plant.age > 0.50)) {
           const head = plant.getHeadPosition(plantX, groundY);
           const dist = Math.hypot(clickX - head.x, clickY - head.y);
           if (dist < 75) {
@@ -2347,7 +3067,8 @@
     }
 
     /**
-     * Dandelion seed blow off: releases 32 parachute seeds that swing and have 1/20 chance to sprout!
+     * Dandelion seed blow off: releases 32 parachute seeds that swing and have 1/20 chance
+     * to sprout! Each seed carries a mutated copy of the parent genome.
      */
     blowDandelion(plant, originX, originY) {
       plant.seedsBlown = true;
@@ -2367,6 +3088,7 @@
           life: 1.0,
           decay: 0.003 + Math.random() * 0.002, // long floating life
           isDandelionSeed: true,
+          parent: plant,
           swingPhase: Math.random() * Math.PI * 2,
           swingSpeed: 2.5 + Math.random() * 2.0
         });
@@ -2377,6 +3099,81 @@
       }
     }
 
+    /**
+     * Release n seeds from a plant's flower head. They fall under gravity, drift with the
+     * wind field, and may germinate where they land (see _landSeed).
+     */
+    releaseSeeds(plant, originX, count = 3) {
+      const head = plant.getHeadPosition(originX, this.groundY);
+      const pal = plant.getPalette();
+      const fPal = pal.flowers[plant.type] || pal.flowers.sunflower;
+      const color = fPal.core || fPal.inner || fPal.deep || fPal.calyx || '#c8a060';
+      for (let i = 0; i < count; i++) {
+        this.particles.push({
+          x: head.x + (Math.random() - 0.5) * 24,
+          y: head.y + (Math.random() - 0.5) * 10,
+          vx: (Math.random() - 0.5) * 2.4,
+          vy: -Math.random() * 1.2,
+          char: Math.random() < 0.5 ? '.' : ',',
+          color,
+          life: 1.0,
+          decay: 0.0,
+          isSeed: true,
+          parent: plant,
+          guaranteed: false
+        });
+      }
+    }
+
+    _canGerminateAt(x, type) {
+      if (x < 30 || x > (this.cssWidth || 800) - 30) return false;
+      if (this.plants.length >= this.capacity) return false;
+      // Competition: no species may crowd out the rest of the meadow
+      const sameSpecies = this.plants.filter(p => p.plant.type === type).length;
+      if (type && sameSpecies >= Math.max(2, Math.ceil(this.capacity * this.maxSpeciesShare))) return false;
+      return !this.plants.some(p => Math.abs(p.x - x) < this.minSpacing);
+    }
+
+    /** A wind-borne seed of a random species drifting in from the upwind edge. */
+    spawnImmigrantSeed(species = SPECIES[Math.floor(Math.random() * SPECIES.length)]) {
+      this.particles.push({
+        x: -10,
+        y: 60 + Math.random() * (this.groundY * 0.5),
+        vx: 1.2 + Math.random() * 1.5,
+        vy: 0.2,
+        char: '*',
+        color: '#e8e2c8',
+        life: 1.0,
+        decay: 0.0,
+        isSeed: true,
+        floaty: true,
+        species,
+        parent: null
+      });
+    }
+
+    _landSeed(p) {
+      const parent = p.parent;
+      const chance = p.isDandelionSeed ? 0.05 : (p.floaty ? 0.6 : this.seedGermination);
+      const needed = this.plants.length < this.floor;
+      if (!(p.guaranteed || needed || Math.random() < chance)) return null;
+      const x = clamp(p.x, 40, (this.cssWidth || 800) - 40);
+      const type = parent ? parent.type : (p.species || 'dandelion');
+      if (!this._canGerminateAt(x, type)) return null;
+
+      const seed = Math.floor(Math.random() * 1000000);
+      const seedling = this.addPlant(x, {
+        type,
+        age: 0.04,
+        height: parent ? parent.height * (0.92 + Math.random() * 0.16) : (type === 'dandelion' ? 240 : 290) + Math.random() * 90,
+        seed,
+        genome: parent ? parent.genome.mutate(seed) : undefined,
+        curvature: parent ? parent.curvature * 0.5 + (Math.random() - 0.5) * 0.3 : 0
+      });
+      if (typeof this.onSeedGerminate === 'function') this.onSeedGerminate(seedling, x);
+      return seedling;
+    }
+
     addPlant(x, plantOptions = {}) {
       const plant = new AsciiPlant({
         ...plantOptions,
@@ -2384,6 +3181,11 @@
       });
       this.plants.push({ x, plant });
       return plant;
+    }
+
+    removePlant(plant) {
+      const i = this.plants.findIndex(p => p.plant === plant);
+      if (i >= 0) this.plants.splice(i, 1);
     }
 
     clear() {
@@ -2398,54 +3200,57 @@
 
       const loop = (now) => {
         if (!this.isRunning) return;
-        const dt = Math.min(0.1, (now - lastTime) / 1000);
+        // Clamp so a backgrounded tab does not fast-forward the simulation on return
+        const dt = Math.min(0.1, Math.max(0, (now - lastTime) / 1000));
         lastTime = now;
 
         this.update(dt);
         this.render();
 
-        requestAnimationFrame(loop);
+        this._raf = requestAnimationFrame(loop);
       };
 
-      requestAnimationFrame(loop);
+      this._raf = requestAnimationFrame(loop);
     }
 
     stop() {
       this.isRunning = false;
+      if (this._raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this._raf);
+      this._raf = null;
     }
 
     update(dt) {
       this.windTime += dt;
-      const groundY = this.cssHeight - 50;
-
-      // Internal Biological Clock: Natural Passing of Time
-      const effectiveDt = dt * this.timeSpeed;
+      const groundY = this.groundY;
+      const dead = [];
 
       this.plants.forEach(({ plant, x }) => {
         // Continuous biological lifecycle:
-        // Growth (0 to 1.0) -> Mature prime plateau at full height (1.0 to 21.0, 20n duration!) -> Senescence (21.0 to 23.5) -> Reseed
+        // Growth (0 -> 1) -> mature prime (1 -> 21, stretched by the life factor)
+        // -> senescence (21 -> 23.5) -> death
         if (this.timeSpeed > 0) {
-          const plantMetabolism = plant.metabolicRate || 1.0;
-          const agingSpeed = 0.025 * this.timeSpeed * plantMetabolism;
-          let newAge = plant.age + effectiveDt * agingSpeed;
+          const newAge = plant.age + plant.agingDelta(dt, this.timeSpeed);
 
-          // Senescence completion: when plant completes its 20n mature life + senescence (age >= 23.5)
-          if (newAge >= 23.5) {
-            // Re-seed with completely different morphology!
-            const newSeed = Math.floor(Math.random() * 1000000);
-            plant.reseed(newSeed);
-            if (typeof this.onPlantReseed === 'function') {
-              this.onPlantReseed(plant, x);
-            }
+          if (newAge >= LIFE_END) {
+            dead.push({ plant, x });
           } else {
             plant.setAge(newAge);
             plant.update(dt, this.timeSpeed);
+          }
+
+          // Spent flower heads set seed which drifts off to start new plants elsewhere
+          const sim = plant.simulator;
+          if (sim.seedRelease > 0) {
+            if (this.lifecycle === 'reproduce') {
+              this.releaseSeeds(plant, x, sim.seedRelease * (2 + Math.round(plant.genome.flowering * 2)));
+            }
+            sim.seedRelease = 0;
           }
         }
 
         // Sunlight nourishment boost update
         if (plant.growthBoost > 0) {
-          if (plant.age > 21.0) {
+          if (plant.age > PRIME_END) {
             // Revitalize aging/senescent plant back to radiant mature prime!
             plant.setAge(Math.max(1.0, plant.age - plant.growthBoost * dt * 4.0));
           } else {
@@ -2471,7 +3276,7 @@
         const isFlowerWilting = af && af.state === 'wilting';
         const hasLeafWilting = plant.simulator && plant.simulator.members && plant.simulator.members.leaves.some(l => l.state === 'wilting');
 
-        if ((isFlowerWilting || plant.age > 21.0) && Math.random() < 0.10) {
+        if ((isFlowerWilting || plant.age > PRIME_END) && Math.random() < 0.10) {
           const head = plant.getHeadPosition(x, groundY);
           const pal = plant.getPalette();
           const fPal = pal.flowers[plant.type] || pal.flowers.sunflower;
@@ -2481,9 +3286,10 @@
             vx: (Math.random() - 0.5) * 1.0 + (this.windStrength * 0.8),
             vy: 0.7 + Math.random() * 0.8,
             char: Math.random() < 0.5 ? '~' : "'",
-            color: fPal.petal || '#ffd700',
+            color: fPal.petal || fPal.outer || fPal.standard || '#ffd700',
             life: 1.0,
-            decay: 0.012 + Math.random() * 0.008
+            decay: 0.012 + Math.random() * 0.008,
+            spin: (Math.random() - 0.5) * 0.2
           });
         }
 
@@ -2496,36 +3302,65 @@
             char: '~',
             color: '#bfa035',
             life: 1.0,
-            decay: 0.015
+            decay: 0.015,
+            spin: (Math.random() - 0.5) * 0.15
           });
         }
       });
 
-      // Update particles (pollen, dandelion seeds, sunlight motes)
+      // End of life: the individual is gone. In 'reproduce' mode it scatters its last seeds
+      // (at least one is guaranteed to take if the meadow is getting sparse); in 'respawn'
+      // mode it is reborn in place from a mutated copy of its own genome.
+      dead.forEach(({ plant, x }) => {
+        if (this.lifecycle === 'respawn') {
+          plant.reseed(Math.floor(Math.random() * 1000000), { inherit: true });
+          if (typeof this.onPlantReseed === 'function') this.onPlantReseed(plant, x);
+          return;
+        }
+        this.removePlant(plant);
+        if (typeof this.onPlantDeath === 'function') this.onPlantDeath(plant, x);
+        const before = this.particles.length;
+        this.releaseSeeds(plant, x, 3 + Math.round(plant.genome.flowering * 2));
+        if (this.plants.length < this.floor && this.particles.length > before) {
+          this.particles[before].guaranteed = true;
+        }
+      });
+
+      if (this.immigration && this.lifecycle === 'reproduce' && this.timeSpeed > 0) {
+        this._immigrationTimer -= dt * this.timeSpeed;
+        if (this._immigrationTimer <= 0) {
+          this._immigrationTimer = 25 + Math.random() * 25;
+          if (this.plants.length < this.capacity) this.spawnImmigrantSeed();
+        }
+      }
+
+      // Update particles (pollen, seeds, petals, sunlight motes)
       for (let i = this.particles.length - 1; i >= 0; i--) {
         const p = this.particles[i];
 
-        if (p.isDandelionSeed) {
-          // Pendulum swinging motion on breeze
-          p.x += p.vx + Math.sin(this.windTime * p.swingSpeed + p.swingPhase) * 1.4;
-          // Float gently downward
-          p.vy = lerp(p.vy, 0.75, dt * 2.0);
+        if (p.isDandelionSeed || p.isSeed) {
+          const gust = this.wind.sample(p.x, this.windTime);
+          if (p.isDandelionSeed) {
+            // Pendulum swinging motion on breeze
+            p.x += p.vx + Math.sin(this.windTime * p.swingSpeed + p.swingPhase) * 1.4 + gust * this.windStrength * 0.8;
+            // Float gently downward
+            p.vy = lerp(p.vy, 0.75, dt * 2.0);
+          } else if (p.floaty) {
+            // Plumed wind-borne seed: rides the gusts and sinks slowly
+            p.vx = lerp(p.vx, (1.0 + gust) * this.windStrength * 2.0 + 0.4, dt * 0.8);
+            p.vy = lerp(p.vy, 0.55, dt * 0.5);
+            p.x += p.vx;
+            if (p.x > (this.cssWidth || 800) - 30) p.vx = -Math.abs(p.vx); // stays in the meadow
+          } else {
+            // Heavier seeds: gravity with air drag, pushed by gusts
+            p.vx = lerp(p.vx, gust * this.windStrength * 2.2, dt * 1.5);
+            p.vy = Math.min(2.6, p.vy + dt * 4.0);
+            p.x += p.vx;
+          }
           p.y += p.vy;
 
-          // Check if seed has landed on soil!
           if (p.y >= groundY) {
-            // 1/20 (5%) chance to sprout a new dandelion seedling!
-            if (Math.random() < 0.05 && this.plants.length < 18) {
-              const newDandelion = this.addPlant(clamp(p.x, 40, this.cssWidth - 40), {
-                type: 'dandelion',
-                age: 0.04,
-                height: 240 + Math.random() * 80,
-                seed: Math.floor(Math.random() * 10000)
-              });
-              if (typeof this.onSeedGerminate === 'function') {
-                this.onSeedGerminate(newDandelion, p.x);
-              }
-            }
+            this._landSeed(p);
             this.particles.splice(i, 1);
             continue;
           }
@@ -2533,6 +3368,7 @@
           // Standard ambient particle
           p.x += p.vx + Math.sin(this.windTime * 2 + p.y * 0.02) * 0.5;
           p.y += p.vy;
+          if (p.spin) p.rot = (p.rot || 0) + p.spin;
         }
 
         p.life -= p.decay;
@@ -2591,100 +3427,60 @@
       }
     }
 
+    /** Every glyph of the current frame, in draw order (CSS-pixel coordinates). */
+    collectGlyphs() {
+      const out = this._soilGlyphs ? this._soilGlyphs.slice() : [];
+      const wind = this.windStrength * (this.reducedMotion ? 0.25 : 1.0);
+      const time = this.reducedMotion ? this.windTime * 0.4 : this.windTime;
+
+      if (this.enableGrass && this.grass.length > 0) {
+        const pal = this.getPalette();
+        for (let i = 0; i < this.grass.length; i++) {
+          const tuft = this.grass[i];
+          const gust = this.wind.sample(tuft.x, this.windTime);
+          const glyphs = tuft.generateGlyphs(time, wind, this.pointer, pal, gust);
+          for (let j = 0; j < glyphs.length; j++) out.push(glyphs[j]);
+        }
+      }
+
+      const groundY = this.groundY;
+      for (let i = 0; i < this.plants.length; i++) {
+        const { x, plant } = this.plants[i];
+        const gust = this.wind.sample(x, this.windTime);
+        const glyphs = plant.generateGlyphs(x, groundY, time, wind, gust);
+        for (let j = 0; j < glyphs.length; j++) out.push(glyphs[j]);
+      }
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        out.push({ x: p.x, y: p.y, char: p.char, fg: p.color, size: p.isDandelionSeed ? 14 : 12, alpha: p.isSeed ? 1 : clamp(p.life, 0, 1), rot: p.rot });
+      }
+      return out;
+    }
+
     /**
-     * 60+ FPS Renderer:
-     * 1. Draws sharp characters in a single fast pass (0.3ms)
-     * 2. Blends a downscaled screen-space bloom pass (0.2ms)
-     * Result: Glorious glowing aesthetic with locked 60-120 FPS!
+     * Frame: background -> every glyph through the sprite atlas in one pass -> one
+     * downscaled screen-space bloom pass over the whole canvas.
      */
     render() {
       const ctx = this.ctx;
-      const w = this.cssWidth;
-      const h = this.cssHeight;
+      if (!ctx) return;
+      const dpr = this.dpr || 1;
+      if (typeof ctx.setTransform === 'function') ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Pure deep black background
       ctx.fillStyle = '#050508';
-      ctx.fillRect(0, 0, w, h);
+      ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
 
-      // Soil ground line
-      const groundY = h - 50;
-      ctx.save();
-      ctx.fillStyle = '#225528';
-      ctx.font = '12px monospace';
-      ctx.textAlign = 'center';
-      for (let gx = 0; gx < w; gx += 16) {
-        ctx.fillText('-', gx, groundY + 12);
-      }
-      ctx.restore();
+      this.renderer.draw(ctx, this.collectGlyphs(), dpr);
 
-      // Living Meadow Grass (Sprout -> Grow -> Wilt -> Die -> Reseed)
-      if (this.enableGrass && this.grass.length > 0) {
-        const pal = this.getPalette();
-        ctx.save();
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        for (let i = 0; i < this.grass.length; i++) {
-          const tuft = this.grass[i];
-          const glyphs = tuft.generateGlyphs(this.windTime, this.windStrength, this.pointer, pal);
-          for (let j = 0; j < glyphs.length; j++) {
-            const g = glyphs[j];
-            ctx.font = `${g.size}px monospace`;
-            ctx.fillStyle = g.fg;
-            ctx.fillText(g.char, g.x, g.y);
-          }
-        }
-        ctx.restore();
-      }
-
-      // Render each living plant (sharp fast pass)
-      this.plants.forEach(({ x, plant }) => {
-        plant.renderToCanvas(ctx, x, groundY, this.windTime, this.windStrength);
-      });
-
-      // Render floating particles
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      this.particles.forEach(p => {
-        ctx.font = p.isDandelionSeed ? '14px monospace' : '12px monospace';
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = p.life;
-        ctx.fillText(p.char, p.x, p.y);
-      });
-      ctx.restore();
-
-      // Fast Screen-Space Bloom Pass (hardware accelerated, covers ALL drawn artefacts with zero per-glyph lag)
-      if (this.bloomCanvas && this.bloomW > 0 && this.bloomH > 0) {
-        this.bloomCtx.clearRect(0, 0, this.bloomW, this.bloomH);
-
-        // Hardware-accelerated canvas filter blur on downscaled 1/3 buffer
-        if (typeof this.bloomCtx.filter !== 'undefined') {
-          this.bloomCtx.filter = 'blur(2.5px)';
-        }
-        this.bloomCtx.drawImage(this.canvas, 0, 0, this.bloomW, this.bloomH);
-        if (typeof this.bloomCtx.filter !== 'undefined') {
-          this.bloomCtx.filter = 'none';
-        }
-
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-
-        // Dual-tier composite for ethereal, soft radiant glow:
-        // Tier 1: Crisp luminous inner core
-        ctx.globalAlpha = 0.38;
-        ctx.drawImage(this.bloomCanvas, 0, 0, w, h);
-
-        // Tier 2: Soft atmospheric diffusion halo
-        ctx.globalAlpha = 0.16;
-        ctx.drawImage(this.bloomCanvas, -2, -2, w + 4, h + 4);
-
-        ctx.restore();
+      if (this.bloom && this.canvas) {
+        this.bloomPass.apply(ctx, this.canvas.width, this.canvas.height);
       }
     }
   }
 
   // =========================================================================
-  // 8. CUSTOM WEB COMPONENTS
+  // 10. CUSTOM WEB COMPONENTS
   // =========================================================================
 
   if (typeof customElements !== 'undefined') {
@@ -2696,6 +3492,8 @@
         const height = parseInt(this.getAttribute('height') || '300', 10);
         const palette = this.getAttribute('palette') || 'botanical';
         const interactive = this.getAttribute('interactive') !== 'false';
+        const curvature = this.hasAttribute('curvature') ? parseFloat(this.getAttribute('curvature')) : 0;
+        const seed = this.hasAttribute('seed') ? parseInt(this.getAttribute('seed'), 10) : undefined;
 
         this.style.display = 'inline-block';
         this.style.background = '#050508';
@@ -2706,17 +3504,34 @@
         canvas.style.width = '100%';
         canvas.style.height = '100%';
         canvas.style.display = 'block';
+        // ASCII art is decorative to screen readers; describe it once instead
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', this.getAttribute('aria-label') || `Animated ASCII ${type} plant`);
         this.appendChild(canvas);
 
-        const garden = new AsciiGarden(canvas, { palette });
+        // A single embedded specimen is reborn in place instead of seeding elsewhere
+        const garden = new AsciiGarden(canvas, { palette, lifecycle: 'respawn' });
         garden.addPlant(canvas.clientWidth / 2 || 140, {
-          type, age, bloom, height, palette, interactive
+          type, age, bloom, height, palette, interactive, curvature, seed
         });
-        garden.start();
         this._garden = garden;
+
+        // Only animate while visible on screen
+        if (typeof IntersectionObserver !== 'undefined') {
+          this._observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
+              if (entry.isIntersecting) garden.start();
+              else garden.stop();
+            });
+          });
+          this._observer.observe(this);
+        } else {
+          garden.start();
+        }
       }
       disconnectedCallback() {
-        if (this._garden) this._garden.stop();
+        if (this._observer) this._observer.disconnect();
+        if (this._garden) this._garden.destroy();
       }
     }
 
@@ -2733,11 +3548,19 @@
     AsciiPlant,
     AsciiGarden,
     GrassTuft,
+    Genome,
     BotanicalSimulator,
     BotanicalArchitect,
     ProceduralFlowerRenderer,
+    GlyphRenderer,
+    GlyphAtlas,
+    TextRasterizer,
+    WindField,
+    SimplexNoise,
+    PRNG,
     PALETTES,
-    SPECIES: ['sunflower', 'hibiscus', 'iris', 'thistle', 'marigold', 'daffodil', 'rose', 'dandelion', 'tulip', 'flytrap'],
+    TRAIT_RANGES,
+    SPECIES,
     generateString: (options) => {
       const plant = new AsciiPlant(options);
       return plant.toPlainText(options.cols || 40, options.rows || 35);

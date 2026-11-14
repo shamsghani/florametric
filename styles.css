@@ -464,6 +464,26 @@ body {
   transform: scale(1.25);
 }
 
+.genome-controls {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.genome-controls .slider-header label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctrl-slider::-webkit-slider-thumb {
+    transition: none;
+  }
+}
+
 .growth-milestones {
   display: flex;
   justify-content: space-between;
