@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
       gain.connect(audioCtx.destination);
       osc.start();
       osc.stop(audioCtx.currentTime + 1.2);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // =========================================================================
@@ -145,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (clickY >= groundY - 70) {
         const speciesList = AsciiPlants.SPECIES;
         const randomSpecies = speciesList[Math.floor(Math.random() * speciesList.length)];
-        
+
         garden.addPlant(clickX, {
           type: randomSpecies,
           age: 0.05,
@@ -295,9 +295,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const loop = (now) => {
       if (activeTab !== 'studio') return;
-      const dt = (now - lastTime) / 1000;
+      const dt = Math.min(0.1, (now - lastTime) / 1000);
       lastTime = now;
       studioTime += dt;
+
+      if (studioPlant) studioPlant.update(dt, 1.0);
 
       renderStudio();
       studioAnimId = requestAnimationFrame(loop);
@@ -348,7 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Render plant
     studioPlant.renderToCanvas(ctx, originX, groundY, studioTime, studioWind);
 
-    // Fast Screen-Space Bloom Pass (velvety glowing halo with zero per-glyph lag)
+    // Fast Screen-Space Bloom Pass (dual-tier ethereal glowing halo with zero per-glyph lag)
     if (!studioBloomCanvas) {
       studioBloomCanvas = document.createElement('canvas');
       studioBloomCtx = studioBloomCanvas.getContext('2d');
@@ -360,12 +362,20 @@ document.addEventListener('DOMContentLoaded', () => {
       studioBloomCanvas.height = bh;
     }
     studioBloomCtx.clearRect(0, 0, bw, bh);
+    if (typeof studioBloomCtx.filter !== 'undefined') {
+      studioBloomCtx.filter = 'blur(2.5px)';
+    }
     studioBloomCtx.drawImage(studioCanvas, 0, 0, bw, bh);
+    if (typeof studioBloomCtx.filter !== 'undefined') {
+      studioBloomCtx.filter = 'none';
+    }
 
     ctx.save();
-    ctx.globalAlpha = 0.40;
     ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.38;
     ctx.drawImage(studioBloomCanvas, 0, 0, w, h);
+    ctx.globalAlpha = 0.16;
+    ctx.drawImage(studioBloomCanvas, -2, -2, w + 4, h + 4);
     ctx.restore();
 
     // Update real-time statistics
@@ -640,7 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnNourish.querySelector('.lbl').textContent = nourishMode ? 'Nourish: On ☀️' : 'Nourish: Off';
     btnNourish.style.borderColor = nourishMode ? 'var(--accent-gold)' : '';
     btnNourish.style.background = nourishMode ? 'rgba(255, 190, 40, 0.15)' : '';
-    
+
     // Change canvas cursor
     gardenCanvas.style.cursor = nourishMode ? 'crosshair' : 'default';
     showToast(nourishMode ? 'Nourish Mode ON: Click/tap to shower sunlight! ☀️' : 'Nourish Mode OFF: Click soil to plant seeds 🌱');
