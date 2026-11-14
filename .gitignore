@@ -19,3 +19,7 @@ __pycache__/
 
 # Vercel CLI project link
 .vercel
+
+# Local deep-research notes (kept off GitHub)
+reports/
+research_notes/
