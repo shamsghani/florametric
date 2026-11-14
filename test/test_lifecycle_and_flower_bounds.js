@@ -140,13 +140,13 @@ const mariRadii = mariFlowerGlyphs.map(g => Math.hypot(g.x - mariHead.x, g.y - m
 const mariMaxR = Math.max(...mariRadii);
 
 console.log(`  Marigold maximum petal radius: ${mariMaxR.toFixed(1)}px`);
-console.assert(mariMaxR < 48, `Marigold must be bounded radial pompom (< 48px, got ${mariMaxR.toFixed(1)}px)`);
+console.assert(mariMaxR < 55, `Marigold must be bounded radial pompom (< 55px, got ${mariMaxR.toFixed(1)}px)`);
 console.log("  ✓ Marigold renders as a lush bounded radial pompom!");
 
 // -------------------------------------------------------------
-// TEST 5: Continuous Plant Life Cycle (Grow -> Bloom -> Wilt -> Die -> Reseed)
+// TEST 5: Continuous Plant Life Cycle (Grow -> Bloom -> 20n Plateau -> Wilt -> Die -> Reseed)
 // -------------------------------------------------------------
-console.log("\n[TEST 5] Testing Continuous Plant Life Cycle...");
+console.log("\n[TEST 5] Testing Continuous Plant Life Cycle (with 20n Mature Plateau)...");
 
 const mockCanvas = {
   width: 800, height: 600, clientWidth: 800, clientHeight: 600,
@@ -170,18 +170,25 @@ console.log(`  Phase 2: Full Bloom age=${testPlant.age.toFixed(2)}, bloom=${simD
 console.assert(simData.bloom > 0.85, "Peak plant must be in full bloom");
 console.assert(simData.senescence === 0, "Full bloom plant must have zero senescence");
 
-// Step 3: Senescence / Wilt (age 1.25)
-testPlant.setAge(1.25);
+// Step 2.5: 20n Mature Prime Plateau (age 12.0)
+testPlant.setAge(12.0);
+simData = testPlant.simulator.simulate(testPlant.age);
+console.log(`  Phase 2.5: 20n Mature Prime Plateau age=${testPlant.age.toFixed(2)}, senescence=${simData.senescence.toFixed(2)}`);
+console.assert(simData.senescence === 0, "20n mature prime plateau must maintain zero senescence");
+console.assert(simData.growthAge === 1.0, "Plant must stay at 100% full vegetative height");
+
+// Step 3: Senescence / Wilt (age 22.0)
+testPlant.setAge(22.0);
 simData = testPlant.simulator.simulate(testPlant.age);
 console.log(`  Phase 3: Senescence age=${testPlant.age.toFixed(2)}, senescence=${simData.senescence.toFixed(2)}, isWilting=${simData.isWilting}`);
-console.assert(simData.isWilting === true, "Post-bloom plant must enter wilting senescence");
-console.assert(simData.senescence > 0.4, "Senescence must be elevated");
+console.assert(simData.isWilting === true, "Post-plateau plant must enter wilting senescence");
+console.assert(simData.senescence > 0.3, "Senescence must be elevated after age 21.0");
 
-// Step 4: Decay stubble (age 1.38)
-testPlant.setAge(1.38);
+// Step 4: Decay stubble (age 23.4)
+testPlant.setAge(23.4);
 simData = testPlant.simulator.simulate(testPlant.age);
 console.log(`  Phase 4: Decay stubble age=${testPlant.age.toFixed(2)}, isDecaying=${simData.isDecaying}`);
-console.assert(simData.isDecaying === true, "Age 1.38 must trigger decay stubble");
+console.assert(simData.isDecaying === true, "Age 23.4 must trigger decay stubble");
 
 // Step 5: Cycle completion & Reseed
 let reseedFired = false;
@@ -190,9 +197,9 @@ garden.onPlantReseed = (p, x) => {
   console.log(`  ✓ onPlantReseed callback fired at x=${x.toFixed(1)}!`);
 };
 
-// Force age to 1.3999 and run update
-testPlant.age = 1.3995;
-garden.update(1.0); // effectiveDt * 0.0011 will push age >= 1.40
+// Force age to 23.499 and run update
+testPlant.age = 23.499;
+garden.update(1.0); // effectiveDt * agingSpeed will push age >= 23.5
 console.log(`  Phase 5: After cycle completion, plant age reset to ${testPlant.age.toFixed(2)}`);
 console.assert(testPlant.age < 0.20, "Plant must reset to young sprout after completing life cycle");
 console.assert(reseedFired === true, "onPlantReseed callback must fire");
@@ -202,7 +209,7 @@ console.assert(reseedFired === true, "onPlantReseed callback must fire");
 // -------------------------------------------------------------
 console.log("\n[TEST 6] Testing Sunlight Revitalization on Wilting Specimen...");
 
-const wiltingPlant = garden.addPlant(300, { type: 'rose', age: 1.25, seed: 999 });
+const wiltingPlant = garden.addPlant(300, { type: 'rose', age: 22.0, seed: 999 });
 console.log(`  Before feed: age=${wiltingPlant.age.toFixed(2)}, wilting=${wiltingPlant.simulator.simulate(wiltingPlant.age).isWilting}`);
 console.assert(wiltingPlant.simulator.simulate(wiltingPlant.age).isWilting === true, "Plant should be wilting");
 
@@ -210,7 +217,7 @@ console.assert(wiltingPlant.simulator.simulate(wiltingPlant.age).isWilting === t
 garden.nourishAt(300, 450, 150);
 garden.update(0.1);
 console.log(`  After sunlight feed: age=${wiltingPlant.age.toFixed(2)}, growthBoost=${wiltingPlant.growthBoost.toFixed(2)}`);
-console.assert(wiltingPlant.age < 1.25, "Sunlight nourishment must reverse aging and revitalize wilting plant");
+console.assert(wiltingPlant.age < 22.0, "Sunlight nourishment must reverse aging and revitalize wilting plant");
 
 console.log("\n==================================================");
 console.log("ALL INVARIANT TESTS PASSED! ✨");

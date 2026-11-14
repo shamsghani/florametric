@@ -11,7 +11,7 @@
 const assert = require('assert');
 const Florametric = require('../florametric.js');
 
-console.log('--- Testing 20x Longer Whole-Plant Lifecycle ---');
+console.log('--- Testing 20n Mature Plateau Lifecycle ---');
 {
   const garden = new Florametric.AsciiGarden(null, { timeSpeed: 1.0 });
   garden.addPlant(100, { type: 'sunflower', age: 0.1 });
@@ -22,13 +22,25 @@ console.log('--- Testing 20x Longer Whole-Plant Lifecycle ---');
   garden.update(10.0);
   const deltaAge = plantEntry.plant.age - initialAge;
   const ratePerSec = deltaAge / 10.0;
-  console.log(`Aging rate per second: ${ratePerSec.toFixed(6)} (Expected ~0.0011)`);
-  assert(Math.abs(ratePerSec - 0.0011) < 0.0002, `Aging speed should be ~0.0011/sec, got ${ratePerSec}`);
+  console.log(`Aging rate per second: ${ratePerSec.toFixed(6)} (Expected ~0.02 - 0.035 with metabolic rate)`);
+  assert(ratePerSec > 0.015 && ratePerSec < 0.045, `Aging speed should reflect metabolic rate, got ${ratePerSec}`);
 
-  // Calculate full lifespan to age 1.40
-  const totalSeconds = 1.40 / 0.0011;
-  console.log(`Total lifespan duration: ${totalSeconds.toFixed(1)}s (~${(totalSeconds / 60).toFixed(1)} minutes)`);
-  assert(totalSeconds > 1200 && totalSeconds < 1400, 'Lifespan should be ~21.2 minutes (~20x longer than ~1 minute)');
+  // Test 20n Mature Prime Plateau:
+  // Plant takes n = 1.0 to reach full height.
+  // Between 1.0 and 21.0 (20n duration), senescence must remain 0.0 and height must remain at 100%!
+  const sim = plantEntry.plant.simulator;
+  [1.0, 5.0, 10.0, 15.0, 20.9].forEach(testAge => {
+    const simData = sim.simulate(testAge);
+    assert.strictEqual(simData.senescence, 0.0, `Age ${testAge} in 20n mature plateau must have senescence = 0`);
+    assert.strictEqual(simData.growthAge, 1.0, `Age ${testAge} must remain at 100% full vegetative growth (got ${simData.growthAge})`);
+    assert(simData.shootHeight >= 300, `Age ${testAge} must remain at full height (got ${simData.shootHeight})`);
+  });
+  console.log('20n mature prime plateau verified: stays at full height for 20n duration (ages 1.0 to 21.0) with zero senescence!');
+
+  // Senescence begins only after age 21.0
+  const senSim = sim.simulate(22.25);
+  assert(senSim.senescence > 0.4, 'Senescence must activate after age 21.0');
+  assert(senSim.isWilting === true, 'Plant must enter wilting after age 21.0');
 }
 
 console.log('--- Testing Leaf Subcycles (Sprout, Mature, Wilt, Die, Resprout) ---');
@@ -159,7 +171,7 @@ console.log('--- Testing Subtle Bloom Pass Support ---');
   assert(typeof plant.feed === 'function', 'plant.feed must be defined');
 
   // Test plant.feed() restores members
-  sim = plant.simulator;
+  const sim = plant.simulator;
   sim.members.leaves[0].state = 'wilting';
   plant.feed(0.5);
   assert.strictEqual(sim.members.leaves[0].state, 'bud', 'Feeding should rejuvenate wilting leaves');
@@ -167,4 +179,65 @@ console.log('--- Testing Subtle Bloom Pass Support ---');
   console.log('Subtle bloom pass and member feed verified!');
 }
 
-console.log('\nAll subcycles, 20x longer lifecycle, and branch dependency tests PASSED successfully! ✿');
+console.log('--- Testing Reseeded Plant Morphology Diversity ---');
+{
+  const plant = new Florametric.AsciiPlant({ type: 'sunflower', seed: 12345 });
+  const habit1 = plant.simulator.geneticHabit;
+  const bend1 = plant.simulator.geneticBendAmp;
+  const leafSizes1 = JSON.stringify(plant.simulator.geneticLeafSizes);
+  const branches1 = plant.simulator.geneticMaxBranches;
+
+  // Reseed with a new genetic seed
+  plant.reseed(987654);
+  const habit2 = plant.simulator.geneticHabit;
+  const bend2 = plant.simulator.geneticBendAmp;
+  const leafSizes2 = JSON.stringify(plant.simulator.geneticLeafSizes);
+
+  console.log(`Original traits: habit=${habit1}, bend=${bend1.toFixed(1)}, branches=${branches1}`);
+  console.log(`Reseeded traits: habit=${habit2}, bend=${bend2.toFixed(1)}`);
+  assert(bend1 !== bend2 || leafSizes1 !== leafSizes2, 'Reseeded plant must have distinct genetic morphology!');
+  console.log('Reseeded plant morphology diversity verified: new seeds produce distinct plant architectures!');
+}
+
+console.log('--- Testing Dense Rose, Tulip, and Venus Flytrap Geometries ---');
+{
+  const palette = Florametric.PALETTES.botanical;
+
+  // 1. Dense English Rose
+  const rosePlant = new Florametric.AsciiPlant({ type: 'rose', age: 1.0, bloom: 1.0, height: 350 });
+  const roseGlyphs = rosePlant.generateGlyphs(200, 400);
+  const roseFlowerGlyphs = roseGlyphs.filter(g =>
+    g.fg === palette.flowers.rose.petal ||
+    g.fg === palette.flowers.rose.dark ||
+    g.fg === palette.flowers.rose.light ||
+    g.fg === palette.flowers.rose.sepal
+  );
+  console.log(`Rose flower glyph count: ${roseFlowerGlyphs.length} (dense target >= 60)`);
+  assert(roseFlowerGlyphs.length >= 60, `Rose must be dense with >= 60 glyphs, got ${roseFlowerGlyphs.length}`);
+
+  // 2. Dense Sculpted Tulip Chalice
+  const tulipPlant = new Florametric.AsciiPlant({ type: 'tulip', age: 1.0, bloom: 1.0, height: 350 });
+  const tulipGlyphs = tulipPlant.generateGlyphs(200, 400);
+  const tulipFlowerGlyphs = tulipGlyphs.filter(g =>
+    g.fg === palette.flowers.tulip.petal ||
+    g.fg === palette.flowers.tulip.inner ||
+    g.fg === palette.flowers.tulip.stamen
+  );
+  console.log(`Tulip flower glyph count: ${tulipFlowerGlyphs.length} (dense target >= 45)`);
+  assert(tulipFlowerGlyphs.length >= 45, `Tulip must be dense with >= 45 glyphs, got ${tulipFlowerGlyphs.length}`);
+
+  // 3. Dense Venus Flytrap Bivalve Trap
+  const flytrapPlant = new Florametric.AsciiPlant({ type: 'flytrap', age: 1.0, bloom: 1.0, height: 350 });
+  const flytrapGlyphs = flytrapPlant.generateGlyphs(200, 400);
+  const flytrapFlowerGlyphs = flytrapGlyphs.filter(g =>
+    g.fg === palette.flowers.flytrap.jaw ||
+    g.fg === palette.flowers.flytrap.inside ||
+    g.fg === palette.flowers.flytrap.teeth ||
+    g.fg === '#fff677'
+  );
+  console.log(`Flytrap jaw glyph count: ${flytrapFlowerGlyphs.length} (dense target >= 50)`);
+  assert(flytrapFlowerGlyphs.length >= 50, `Flytrap must be dense with >= 50 glyphs, got ${flytrapFlowerGlyphs.length}`);
+  console.log('Dense rose, tulip, and venus flytrap geometries verified! ✨');
+}
+
+console.log('\nAll subcycles, 20n mature plateau, reseed diversity, and dense flower tests PASSED successfully! ✿');
