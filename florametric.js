@@ -780,10 +780,24 @@
           af.wiltTimer -= effectiveDt;
           af.bloom = Math.max(0.12, af.bloom - effectiveDt * 0.08);
           if (af.wiltTimer <= 0 || af.bloom <= 0.14) {
-            af.state = 'dead';
+            // The spent head sets seed and holds it while it dries
+            af.state = 'seedhead';
             af.bloom = 0.0;
+            af.seedDuration = 8.0 + 6.0 * g.flowering;
+            af.seedTimer = af.seedDuration;
+            af.seedsDropped = 0;
+          }
+        } else if (af.state === 'seedhead') {
+          af.seedTimer -= effectiveDt;
+          const progress = 1 - af.seedTimer / af.seedDuration;
+          // Seeds fall in three waves as the head dries out
+          while (af.seedsDropped < 3 && progress >= (af.seedsDropped + 1) / 3) {
+            af.seedsDropped++;
+            this.seedRelease++;
+          }
+          if (af.seedTimer <= 0) {
+            af.state = 'dead';
             af.resproutTimer = 8.0;
-            this.seedRelease++; // the spent flower head sets seed
           }
         } else if (af.state === 'dead' && senescence < 0.85) {
           af.resproutTimer -= effectiveDt;
@@ -917,10 +931,11 @@
           l.wiltTimer = 18.0;
         }
       });
+      // A fed flower re-opens from a half-open bud over a few seconds (no snapping)
       const af = this.members.apicalFlower;
-      if (af.state === 'wilting' || af.state === 'dead') {
-        af.state = 'blooming';
-        af.bloom = 0.85;
+      if (af.state === 'wilting' || af.state === 'seedhead' || af.state === 'dead') {
+        af.state = 'opening';
+        af.bloom = Math.max(af.bloom, 0.45);
         af.age = 0.0;
       }
       this.members.branches.forEach(b => {
@@ -932,9 +947,9 @@
             bl.age = 0.0;
           }
         });
-        if (b.flower && (b.flower.state === 'wilting' || b.flower.state === 'dead')) {
-          b.flower.state = 'blooming';
-          b.flower.bloom = 0.80;
+        if (b.flower && !b.flower.sterile && (b.flower.state === 'wilting' || b.flower.state === 'dead')) {
+          b.flower.state = 'opening';
+          b.flower.bloom = Math.max(b.flower.bloom, 0.45);
           b.flower.isDead = false;
         }
       });
@@ -1108,7 +1123,10 @@
       if (bloomOverride !== null) {
         bloom = clamp(bloomOverride, 0.0, 1.0);
       } else if (this.members && this.members.apicalFlower && this.members.apicalFlower.state !== 'dormant') {
-        bloom = this.members.apicalFlower.bloom;
+        const afm = this.members.apicalFlower;
+        // A wilting flower does not close back into a bud: it keeps its open shape
+        // and the wilt effect sheds, droops and fades it instead
+        bloom = afm.state === 'wilting' ? Math.max(afm.bloom, 0.92) : afm.bloom;
       } else if (growthAge > 0.42) {
         // Natural gradual opening starting at age 0.42, fully open at 0.88
         bloom = smoothstep(0.42, 0.88, growthAge);
@@ -1131,8 +1149,16 @@
       // 0 = fresh bloom, 1 = fully spent; drives the yellowing of the flower stalk only
       let flowerSpent = 0;
       if (af && af.state === 'wilting') flowerSpent = clamp(1 - af.wiltTimer / 11.0, 0, 1);
+      else if (af && af.state === 'seedhead') flowerSpent = 1;
       else if (af && af.state === 'dead') flowerSpent = clamp(af.resproutTimer / 8.0, 0, 1);
       const isWilting = senescence > 0.15;
+
+      // Visible ageing follows the genome: long-lived, vigorous plants brown later & slower
+      const browningRate = clamp(1.45 - 0.45 * g.lifeFactor - 0.4 * (g.vigor - 1.0), 0.6, 1.4);
+      const ageing = clamp(senescence * browningRate, 0, 1);
+      // How wilted the main flower head looks (0..1): its own wilt, or old age
+      const flowerWilt = Math.max(flowerWilting ? flowerSpent : 0, smoothstep(0.1, 0.8, ageing));
+      const seedProgress = (af && af.state === 'seedhead') ? clamp(1 - af.seedTimer / af.seedDuration, 0, 1) : 0;
 
       return {
         type: this.type,
@@ -1142,6 +1168,10 @@
         isWilting,
         flowerWilting,
         flowerSpent,
+        flowerWilt,
+        flowerPhase: af ? af.state : 'dormant',
+        seedProgress,
+        ageing,
         isDecaying: (senescence >= 0.88),
         bloom,
         isBud,
@@ -1550,12 +1580,14 @@
 
         // Child flower at branch tip
         const bFlower = b.flower;
-        const bBloom = (bFlower && bFlower.state !== 'dormant' && !bFlower.isDead) ? bFlower.bloom : (b.hasFlower ? bloom * 0.8 : 0);
+        let bBloom = (bFlower && bFlower.state !== 'dormant' && !bFlower.isDead) ? bFlower.bloom : (b.hasFlower ? bloom * 0.8 : 0);
+        if (bFlower && bFlower.state === 'wilting') bBloom = Math.max(bBloom, 0.85);
         if (bBloom > 0.15) {
           const tip = along(b.length);
+          const ownWilt = (bFlower && bFlower.state === 'wilting') ? clamp(1 - bFlower.bloom / 0.85, 0, 1) : 0;
           const secFlower = ProceduralFlowerRenderer.generateGlyphs(
             pType, tip.x, tip.y, fScale * 0.65, bBloom, palette, time, false,
-            (pData.isWilting || isWithering || (bFlower && bFlower.state === 'wilting')),
+            Math.max(ownWilt, isWithering ? 0.8 : 0, smoothstep(0.1, 0.8, pData.ageing || 0)),
             b.side * b.angle * 0.4 + (pData.windLean || 0), pData.variant
           );
           glyphs.push(...secFlower);
@@ -1571,9 +1603,13 @@
       const tiltX = apexX + Math.sin(tilt) * 18;
       const tiltY = apexY - Math.cos(tilt) * 14;
 
-      if (pData.isBud) {
+      if (pData.flowerPhase === 'seedhead') {
+        glyphs.push(...ProceduralFlowerRenderer.generateSeedHead(
+          pType, tiltX, tiltY, fScale, palette, pData.seedProgress, tilt * 0.5 + (pData.windLean || 0), pData.variant
+        ));
+      } else if (pData.isBud) {
         const flowerGlyphs = ProceduralFlowerRenderer.generateGlyphs(
-          pType, tiltX, tiltY, fScale, bloom, palette, time, seedsBlown, (pData.isWilting || pData.flowerWilting),
+          pType, tiltX, tiltY, fScale, bloom, palette, time, seedsBlown, pData.flowerWilt || 0,
           tilt * 0.5 + (pData.windLean || 0), pData.variant
         );
         glyphs.push(...flowerGlyphs);
@@ -1591,7 +1627,7 @@
      *    as the next bud forms. A finished flower never browns the whole plant.
      */
     static _applyAgeing(glyphs, pData, groundY, palette) {
-      const sen = pData.senescence || 0;
+      const sen = pData.ageing !== undefined ? pData.ageing : (pData.senescence || 0);
       const spent = pData.flowerSpent || 0;
       if (sen <= 0 && spent <= 0) return;
       const stem = palette.stem;
@@ -1626,8 +1662,71 @@
      * with the stem tip and the wind; variant (0..1) gives each individual its own
      * petal irregularity.
      */
-    static generateGlyphs(type, cx, cy, scale, bloom, palette, time = 0, seedsBlown = false, isWilting = false, headRot = 0, variant = 0) {
-      const glyphs = this._generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, isWilting, variant);
+    static generateGlyphs(type, cx, cy, scale, bloom, palette, time = 0, seedsBlown = false, wilt = 0, headRot = 0, variant = 0) {
+      const glyphs = this._generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, variant);
+      return this._finishHead(glyphs, type, cx, cy, scale, palette, wilt, headRot);
+    }
+
+    /**
+     * A spent flower head that holds its seeds until they drop.
+     * progress: 0 = just set seed, 1 = every seed has fallen.
+     */
+    static generateSeedHead(type, cx, cy, scale, palette, progress = 0, headRot = 0, variant = 0) {
+      const glyphs = [];
+      const fPal = palette.flowers[type] || palette.flowers.sunflower;
+      const dry = mixColor(palette.wilted || '#b08e2f', palette.dead || '#7d5c28', 0.45);
+      const dark = palette.dead || '#7d5c28';
+      const remaining = 1 - clamp(progress, 0, 1);
+      const s = scale;
+      const fcy = cy - 18 * s;
+
+      if (type === 'rose') {
+        // Rose hip: a swollen, glossy fruit below withered sepals
+        const hip = mixColor(fPal.dark || fPal.petal, dark, 0.35);
+        [[-5, 0, '('], [0, -2, '0'], [5, 0, ')'], [0, 6, 'v']].forEach(([dx, dy, ch]) => {
+          glyphs.push({ x: cx + dx * s, y: fcy + dy * s, char: ch, fg: ch === 'v' ? dry : hip, size: 14 * s });
+        });
+        [-1, 0, 1].forEach(k => glyphs.push({ x: cx + k * 6 * s, y: fcy - 10 * s, char: k === 0 ? '^' : (k < 0 ? '\\' : '/'), fg: dry, size: 11 * s }));
+      } else if (type === 'dandelion') {
+        this._buildDandelion(glyphs, cx, cy, scale, 1.0, Object.assign({}, fPal, { seed: dry, core: dark }), 0, true);
+      } else if (type === 'sunflower' || type === 'marigold' || type === 'daffodil' || type === 'thistle') {
+        // Seed disc: florets have become seeds; they fall out as progress advances
+        const rDisc = (type === 'sunflower' ? 18 : 11) * s;
+        const count = Math.round((type === 'sunflower' ? 46 : 22) * (0.25 + 0.75 * remaining));
+        const golden = 2.3999632;
+        for (let k = 0; k < count; k++) {
+          const rf = Math.sqrt((k + 0.5) / count);
+          const th = k * golden + variant * 6;
+          glyphs.push({
+            x: cx + Math.cos(th) * rf * rDisc,
+            y: fcy + Math.sin(th) * rf * rDisc * 0.85,
+            char: k % 3 === 0 ? '.' : (k % 3 === 1 ? ':' : '#'),
+            fg: rf < 0.6 ? dark : dry,
+            size: Math.max(9, Math.round(11 * s))
+          });
+        }
+        // A ring of withered bracts
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2;
+          glyphs.push({ x: cx + Math.cos(a) * (rDisc + 5 * s), y: fcy + Math.sin(a) * (rDisc + 5 * s) * 0.85 + 3 * s, char: '~', fg: dry, size: 10 * s, rot: a + Math.PI / 2 });
+        }
+      } else {
+        // Seed capsule (tulip, iris, hibiscus, flytrap): splits open from the top
+        const split = clamp(progress * 1.4, 0, 1);
+        for (let row = 0; row < 4; row++) {
+          const y = fcy + 8 * s - row * 7 * s;
+          glyphs.push({ x: cx - (5 + split * row * 1.5) * s, y, char: '(', fg: dry, size: 13 * s });
+          glyphs.push({ x: cx + (5 + split * row * 1.5) * s, y, char: ')', fg: dry, size: 13 * s });
+          if (remaining > row * 0.25) glyphs.push({ x: cx, y, char: ':', fg: dark, size: 12 * s });
+        }
+        glyphs.push({ x: cx, y: fcy - 22 * s, char: split > 0.3 ? 'v' : '^', fg: dry, size: 12 * s });
+      }
+      // Spent heads nod under their own weight
+      return this._finishHead(glyphs, type, cx, cy, scale, palette, 0, headRot + 0.25 * Math.sign(headRot || 1));
+    }
+
+    static _finishHead(glyphs, type, cx, cy, scale, palette, wilt, headRot) {
+      wilt = wilt === true ? 1 : clamp(+wilt || 0, 0, 1);
       // Row-built heads (hibiscus, iris) read as slanted slabs when rotated far
       headRot = clamp(headRot * (HEAD_ROT_RESPONSE[type] !== undefined ? HEAD_ROT_RESPONSE[type] : 1.0), -0.4, 0.4);
       if (headRot) {
@@ -1643,10 +1742,38 @@
           g.rot = (g.rot || 0) + headRot;
         }
       }
-      return glyphs;
+      // Wilt after rotation so drooping always points down (gravity), whatever the tilt
+      return this._applyWilt(glyphs, cx, cy, scale, wilt, palette);
     }
 
-    static _generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, isWilting, variant) {
+    /**
+     * Gradual, palette-aware wilting shared by every species (w in 0..1):
+     * outer petals shed first (deterministically, so the same ones stay gone), colours
+     * fade in steps toward the palette's own withered tones, and the head droops.
+     */
+    static _applyWilt(glyphs, cx, cy, scale, w, palette) {
+      if (w <= 0 || glyphs.length === 0) return glyphs;
+      const withered = mixColor(palette.wilted || '#b08e2f', palette.dead || '#7d5c28', 0.55);
+      const centreY = cy - 22 * scale;
+      let maxR = 1;
+      for (let i = 0; i < glyphs.length; i++) {
+        maxR = Math.max(maxR, Math.hypot(glyphs[i].x - cx, glyphs[i].y - centreY));
+      }
+      const out = [];
+      for (let i = 0; i < glyphs.length; i++) {
+        const g = glyphs[i];
+        const r = Math.hypot(g.x - cx, g.y - centreY) / maxR;
+        const h = (Math.imul(i + 1, 2654435761) >>> 0) / 4294967296;
+        if (r > 0.4 && h < w * 0.85 * (r - 0.4) / 0.6) continue; // shed petal
+        g.x += (cx - g.x) * 0.15 * w * r;                         // collapse inward
+        g.y += w * r * r * 18 * scale;                            // droop under gravity
+        g.fg = mixColor(g.fg, withered, w * (0.3 + 0.7 * r));
+        out.push(g);
+      }
+      return out;
+    }
+
+    static _generateUpright(type, cx, cy, scale, bloom, palette, time, seedsBlown, variant) {
       const glyphs = [];
       const fPalette = palette.flowers[type] || palette.flowers.sunflower;
       const cStem = palette.stem;
@@ -1691,37 +1818,37 @@
 
       switch (type) {
         case 'sunflower':
-          this._buildSunflower(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildSunflower(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         case 'hibiscus':
-          this._buildHibiscus(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildHibiscus(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         case 'iris':
-          this._buildIris(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildIris(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         case 'thistle':
-          this._buildThistle(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildThistle(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         case 'marigold':
-          this._buildMarigold(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildMarigold(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         case 'daffodil':
-          this._buildDaffodil(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildDaffodil(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         case 'rose':
-          this._buildRose(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildRose(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         case 'dandelion':
-          this._buildDandelion(glyphs, cx, cy, scale, bEff, fPalette, time, seedsBlown, isWilting);
+          this._buildDandelion(glyphs, cx, cy, scale, bEff, fPalette, time, seedsBlown);
           break;
         case 'tulip':
-          this._buildTulip(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildTulip(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         case 'flytrap':
-          this._buildFlytrap(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildFlytrap(glyphs, cx, cy, scale, bEff, fPalette, time);
           break;
         default:
-          this._buildSunflower(glyphs, cx, cy, scale, bEff, fPalette, time, isWilting);
+          this._buildSunflower(glyphs, cx, cy, scale, bEff, fPalette, time);
       }
 
       return glyphs;
@@ -1732,7 +1859,7 @@
      * Central Fibonacci disc florets are strictly bounded within rDisc.
      * Ray petals radiate outwards from rDisc to frame the seed head with zero side bleeding.
      */
-    static _buildSunflower(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildSunflower(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 25 * s;
 
       // 1. Central Fibonacci Phyllotaxis Seed Disc (Strictly bounded inside rDisc)
@@ -1751,13 +1878,13 @@
         let col = pal.coreDeep;
         if (rFrac < 0.35) {
           ch = (k % 3 === 0) ? '8' : '&';
-          col = isWilting ? '#523a1a' : pal.coreDeep;
+          col = pal.coreDeep;
         } else if (rFrac < 0.75) {
           ch = (k % 2 === 0) ? '*' : '#';
-          col = isWilting ? '#634720' : pal.core;
+          col = pal.core;
         } else {
           ch = (k % 2 === 0) ? '%' : 'o';
-          col = isWilting ? '#7a5b28' : pal.petalWarm;
+          col = pal.petalWarm;
         }
 
         out.push({
@@ -1790,15 +1917,12 @@
             for (let seg = 1; seg <= 4; seg++) {
               const segFrac = seg / 4.0;
               const rDist = (rDisc * 0.92) + (segFrac * petalReach);
-              const droop = isWilting ? (segFrac * segFrac * 14 * s) : 0;
               const curl = Math.sin(segFrac * Math.PI + i * 0.8) * 5 * s;
               const px = cx + Math.cos(angle) * rDist - Math.sin(angle) * curl;
-              const py = fcy + Math.sin(angle) * (rDist * 0.88) + Math.cos(angle) * curl + droop;
+              const py = fcy + Math.sin(angle) * (rDist * 0.88) + Math.cos(angle) * curl;
 
               const ch = seg === 4 ? (lIdx === 0 ? "{" : "}") : glyphsChoice[(i * 2 + seg) % glyphsChoice.length];
-              const col = isWilting
-                ? (seg >= 3 ? '#997722' : '#886611')
-                : (seg >= 3 ? pal.petal : pal.petalWarm);
+              const col = seg >= 3 ? pal.petal : pal.petalWarm;
 
               out.push({
                 x: px,
@@ -1814,7 +1938,7 @@
       }
     }
 
-    static _buildHibiscus(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildHibiscus(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 25 * s;
       const rows = [
         ["           /!/          ", pal.outer],
@@ -1835,8 +1959,8 @@
 
       rows.forEach((row, rIdx) => {
         const text = row[0];
-        const col = isWilting ? '#8c6b2a' : row[1];
-        const ly = startY + rIdx * spY + (isWilting ? (rIdx * 1.5 * s) : 0);
+        const col = row[1];
+        const ly = startY + rIdx * spY;
         const startX = cx - (text.length * spX) / 2.0;
         for (let cIdx = 0; cIdx < text.length; cIdx++) {
           const ch = text[cIdx];
@@ -1849,7 +1973,6 @@
       // Golden stamen pushes forward as flower blooms!
       if (b > 0.3) {
         const stamenProgress = (b - 0.3) / 0.7;
-        const droopY = isWilting ? 12 * s : 0;
         const stamenPts = [
           { dx: -6 * s * stamenProgress, dy: 5 * s, ch: '%' },
           { dx: -18 * s * stamenProgress, dy: -4 * s, ch: '/' },
@@ -1859,12 +1982,12 @@
           { dx: -58 * s * stamenProgress, dy: -44 * s, ch: '*' }
         ];
         stamenPts.forEach(pt => {
-          out.push({ x: cx + pt.dx, y: fcy + pt.dy + droopY, char: pt.ch, fg: isWilting ? '#8a7024' : pal.stamen, size: 15 * s });
+          out.push({ x: cx + pt.dx, y: fcy + pt.dy, char: pt.ch, fg: pal.stamen, size: 15 * s });
         });
       }
     }
 
-    static _buildIris(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildIris(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 20 * s;
       const standardsLeft = [
         { dx: -16 * s * b, dy: -20 * s, txt: "((" },
@@ -1884,9 +2007,9 @@
         for (let i = 0; i < pt.txt.length; i++) {
           out.push({
             x: cx + pt.dx + i * 7.5 * s,
-            y: fcy + pt.dy + (isWilting ? 10 * s : 0),
+            y: fcy + pt.dy,
             char: pt.txt[i],
-            fg: isWilting ? '#635338' : pal.standard,
+            fg: pal.standard,
             size: 14 * s
           });
         }
@@ -1898,9 +2021,9 @@
         for (let i = 0; i <= fallSteps; i++) {
           const ft = i / fallSteps;
           const fx = cx + side * (12 * s + ft * 20 * s * b);
-          const fy = fcy - 4 * s + (ft * 34 * s * b) + Math.sin(ft * Math.PI) * 6 * s + (isWilting ? 8 * s : 0);
+          const fy = fcy - 4 * s + (ft * 34 * s * b) + Math.sin(ft * Math.PI) * 6 * s;
           const ch = i === fallSteps ? (side < 0 ? "\\" : "/") : (i % 3 === 0 ? "@" : (i % 3 === 1 ? "#" : "%"));
-          const col = isWilting ? '#604f32' : (i % 2 === 0 ? pal.fall : pal.standard);
+          const col = (i % 2 === 0 ? pal.fall : pal.standard);
           out.push({ x: fx, y: fy, char: ch, fg: col, size: Math.max(10, Math.round((12 + ft * 3) * s)) });
         }
       }
@@ -1910,14 +2033,14 @@
         throat.forEach(tr => {
           for (let i = 0; i < tr.txt.length; i++) {
             const ch = tr.txt[i];
-            const col = isWilting ? '#7c6530' : ((ch === '@' || ch === '9' || ch === '&') ? pal.signal : pal.deep);
+            const col = ((ch === '@' || ch === '9' || ch === '&') ? pal.signal : pal.deep);
             out.push({ x: cx + (i - tr.txt.length / 2) * 8 * s, y: fcy + tr.dy, char: ch, fg: col, size: 14 * s });
           }
         });
       }
     }
 
-    static _buildThistle(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildThistle(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 15 * s;
       const calyxChars = [":", ";", "%", "&", "#", "@", "|"];
       const rCalyx = 26 * s;
@@ -1925,7 +2048,7 @@
         const widthAtY = Math.sin((dy / (rCalyx * 1.3)) * Math.PI) * rCalyx;
         for (let dx = -Math.floor(widthAtY); dx <= Math.floor(widthAtY); dx += 7) {
           const ch = calyxChars[(Math.abs(dx + dy)) % calyxChars.length];
-          out.push({ x: cx + dx, y: fcy + dy, char: ch, fg: isWilting ? '#52482a' : pal.calyx, size: 12.5 * s });
+          out.push({ x: cx + dx, y: fcy + dy, char: ch, fg: pal.calyx, size: 12.5 * s });
         }
       }
       for (let plume = -4; plume <= 4; plume++) {
@@ -1933,9 +2056,9 @@
         for (let step = 1; step <= 7; step++) {
           const dist = step * 11 * s * b;
           const px = cx + Math.cos(pAngle) * dist;
-          const py = fcy + Math.sin(pAngle) * dist + (isWilting ? step * 2 * s : 0);
+          const py = fcy + Math.sin(pAngle) * dist;
           const ch = step >= 5 ? '!' : '|';
-          const col = isWilting ? '#6e5436' : (step >= 4 ? pal.brush : pal.brushDark);
+          const col = (step >= 4 ? pal.brush : pal.brushDark);
           out.push({ x: px, y: py, char: ch, fg: col, size: 14 * s, rot: pAngle + Math.PI / 2 });
         }
       }
@@ -1946,7 +2069,7 @@
      * Multi-tiered ruffled concentric domes of yellow, orange, and crimson frilled petals.
      * Perfectly radial and hemispherical with zero rectangular edge spill.
      */
-    static _buildMarigold(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildMarigold(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 20 * s;
       const numTiers = Math.floor(4 + 3 * b);
       const maxR = 30 * s * b;
@@ -1956,15 +2079,13 @@
         const tierFrac = tier / numTiers;
         const tierR = tierFrac * maxR;
         const petalCount = Math.floor(6 + tier * 5);
-        const col = isWilting
-          ? '#826524'
-          : (tierFrac < 0.4 ? pal.yellow : (tierFrac < 0.75 ? pal.orange : pal.crimson));
+        const col = (tierFrac < 0.4 ? pal.yellow : (tierFrac < 0.75 ? pal.orange : pal.crimson));
 
         for (let p = 0; p < petalCount; p++) {
           const ang = (p / petalCount) * 2 * Math.PI + (tier * 0.4);
           const r = tierR * (0.85 + 0.15 * Math.sin(p * 3 + tier + (this._variant || 0) * 30));
           const px = cx + Math.cos(ang) * r;
-          const py = fcy + Math.sin(ang) * (r * 0.75) + (isWilting ? 6 * s : 0);
+          const py = fcy + Math.sin(ang) * (r * 0.75);
           const ch = chars[(tier * 2 + p) % chars.length];
           out.push({
             x: px,
@@ -1978,13 +2099,13 @@
       }
     }
 
-    static _buildDaffodil(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildDaffodil(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 20 * s;
       const gridChars = ["#", "*", "%", "#", "*"];
       for (let dy = -2; dy <= 2; dy++) {
         for (let dx = -2; dx <= 2; dx++) {
           const ch = gridChars[(Math.abs(dx + dy)) % gridChars.length];
-          const col = (dx === 0 && dy === 0) ? (isWilting ? '#7d6824' : pal.inner) : (isWilting ? '#947a28' : pal.cup);
+          const col = (dx === 0 && dy === 0) ? (pal.inner) : (pal.cup);
           out.push({ x: cx + dx * 9 * s, y: fcy + dy * 9 * s, char: ch, fg: col, size: 13.5 * s });
         }
       }
@@ -1993,9 +2114,9 @@
         for (let step = 1; step <= 5; step++) {
           const dist = 18 * s + step * 10 * s * b;
           const px = cx + Math.cos(ang) * dist;
-          const py = fcy + Math.sin(ang) * dist + (isWilting ? step * 1.5 * s : 0);
+          const py = fcy + Math.sin(ang) * dist;
           const ch = step === 5 ? '*' : (step >= 3 ? '^' : '+');
-          out.push({ x: px, y: py, char: ch, fg: isWilting ? '#9e852a' : pal.petal, size: 14 * s, rot: ang + Math.PI / 2 });
+          out.push({ x: px, y: py, char: ch, fg: pal.petal, size: 14 * s, rot: ang + Math.PI / 2 });
         }
       }
     }
@@ -2005,7 +2126,7 @@
      * Multi-tiered concentric spiraling whorls, velvet Fermat core, cupped mid petals,
      * scalloped outer reflexed petals, and basal sepals.
      */
-    static _buildRose(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildRose(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 22 * s;
 
       // 1. Basal protective sepals wrapping the rose cup
@@ -2021,7 +2142,7 @@
           x: cx + sp.dx,
           y: fcy + sp.dy,
           char: sp.ch,
-          fg: isWilting ? '#52482a' : (pal.sepal || '#4ba032'),
+          fg: (pal.sepal || '#4ba032'),
           size: 14 * s
         });
       });
@@ -2038,7 +2159,7 @@
         const px = cx + Math.cos(theta) * r;
         const py = fcy + Math.sin(theta) * (r * 0.72);
         const ch = coreChars[k % coreChars.length];
-        const col = isWilting ? '#6e1d2c' : pal.dark;
+        const col = pal.dark;
         out.push({
           x: px,
           y: py,
@@ -2050,9 +2171,9 @@
 
       // 3. Middle overlapping cupped petals & outer scalloped whorls
       const petalRings = [
-        { count: 4, r: 22 * s * b, chars: ['(', ')', '{', '}', '%', '&'], col: isWilting ? '#7e2434' : pal.petal },
-        { count: 5, r: 30 * s * b, chars: ['{', '}', '(', ')', 'S', 's'], col: isWilting ? '#8c2d3e' : pal.petal },
-        { count: 6, r: 38 * s * b, chars: ['{', '}', '~', '(', ')', 'S'], col: isWilting ? '#99394d' : pal.light }
+        { count: 4, r: 22 * s * b, chars: ['(', ')', '{', '}', '%', '&'], col: pal.petal },
+        { count: 5, r: 30 * s * b, chars: ['{', '}', '(', ')', 'S', 's'], col: pal.petal },
+        { count: 6, r: 38 * s * b, chars: ['{', '}', '~', '(', ')', 'S'], col: pal.light }
       ];
 
       petalRings.forEach((ring, rIdx) => {
@@ -2066,9 +2187,8 @@
             const ang = baseAng + u * span;
             const cupping = Math.cos(u * Math.PI);
             const r = ring.r * (0.84 + 0.20 * cupping);
-            const droop = isWilting ? (st * 1.5 * s) : 0;
             const px = cx + Math.cos(ang) * r;
-            const py = fcy + Math.sin(ang) * (r * 0.74) + droop;
+            const py = fcy + Math.sin(ang) * (r * 0.74);
             const ch = (st === 0 || st === steps)
               ? (u < 0 ? '(' : ')')
               : ring.chars[(p * 3 + st) % ring.chars.length];
@@ -2117,7 +2237,7 @@
      * Elegant goblet chalice with vertical striations, golden internal stamens,
      * basal receptacle, and flaring crown tepal tips.
      */
-    static _buildTulip(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildTulip(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 22 * s;
       const cupHeight = 44 * s;
       const flare = 0.75 + 0.35 * b;
@@ -2133,7 +2253,7 @@
             x: sx,
             y: fcy - (8 + sy * 5.5) * s,
             char: '|',
-            fg: isWilting ? '#5e481c' : '#8a6010',
+            fg: '#8a6010',
             size: 13 * s
           });
         }
@@ -2142,7 +2262,7 @@
           x: sx,
           y: fcy - (23 + Math.abs(st) * 3) * s,
           char: '*',
-          fg: isWilting ? '#a88a38' : pal.stamen,
+          fg: pal.stamen,
           size: 14 * s
         });
       }
@@ -2150,13 +2270,13 @@
       // 2. Dense Chalice Body & Petal Striations (layer by layer from base to rim)
       for (let li = 0; li < numLayers; li++) {
         const vFrac = li / (numLayers - 1); // 0 = base, 1 = rim
-        const ly = fcy + 12 * s - vFrac * cupHeight + (isWilting ? (vFrac * 4 * s) : 0);
+        const ly = fcy + 12 * s - vFrac * cupHeight;
         const cupProfile = Math.sin(vFrac * 0.86 * Math.PI);
         const layerW = (7 * s) + (maxW * cupProfile);
 
         // Left petal contour
         const leftChar = vFrac > 0.85 ? '/' : (vFrac > 0.3 ? '(' : '\\');
-        const outerCol = isWilting ? '#7c2b3e' : pal.petal;
+        const outerCol = pal.petal;
         out.push({ x: cx - layerW, y: ly, char: leftChar, fg: outerCol, size: 14 * s });
 
         // Right petal contour
@@ -2169,16 +2289,16 @@
           const u = j / innerSteps;
           const ix = cx + u * layerW * 0.88;
           let ch = '|';
-          let col = isWilting ? '#63212f' : pal.inner;
+          let col = pal.inner;
           if (Math.abs(u) < 0.25) {
             ch = (li % 2 === 0) ? '|' : '!';
-            col = isWilting ? '#7c2b3e' : pal.petal;
+            col = pal.petal;
           } else if (Math.abs(u) < 0.65) {
             ch = (u < 0) ? '(' : ')';
-            col = (li > 4) ? (isWilting ? '#7c2b3e' : pal.petal) : (isWilting ? '#63212f' : pal.inner);
+            col = (li > 4) ? (pal.petal) : (pal.inner);
           } else {
             ch = (li % 2 === 0) ? '%' : '#';
-            col = isWilting ? '#63212f' : pal.inner;
+            col = pal.inner;
           }
           out.push({ x: ix, y: ly, char: ch, fg: col, size: 13.5 * s });
         }
@@ -2187,9 +2307,9 @@
       // 3. Flared Crown Tepal Tips
       for (let t = -2; t <= 2; t++) {
         const tx = cx + t * (maxW * 0.42);
-        const ty = fcy - 32 * s - (1 - Math.abs(t) * 0.25) * 6 * s + (isWilting ? 6 * s : 0);
+        const ty = fcy - 32 * s - (1 - Math.abs(t) * 0.25) * 6 * s;
         const ch = (t === 0) ? '^' : (t < 0 ? '/' : '\\');
-        out.push({ x: tx, y: ty, char: ch, fg: isWilting ? '#7c2b3e' : pal.petal, size: 14 * s });
+        out.push({ x: tx, y: ty, char: ch, fg: pal.petal, size: 14 * s });
       }
     }
 
@@ -2198,7 +2318,7 @@
      * Realistic bivalve trap with green basal hinge, crimson digestive glandular carpet,
      * sensitive trigger spines, and bristling marginal cilia needle teeth!
      */
-    static _buildFlytrap(out, cx, cy, s, b, pal, time, isWilting = false) {
+    static _buildFlytrap(out, cx, cy, s, b, pal, time) {
       const fcy = cy - 20 * s;
       const isOpen = b > 0.3;
       const openSpread = isOpen ? (0.6 + 0.4 * b) : 0.2;
@@ -2209,14 +2329,14 @@
           x: cx + hx * 6 * s,
           y: fcy + 14 * s,
           char: '#',
-          fg: isWilting ? '#4a4422' : pal.jaw,
+          fg: pal.jaw,
           size: 13.5 * s
         });
         out.push({
           x: cx + hx * 5 * s,
           y: fcy + 18 * s,
           char: (hx === 0 ? 'v' : (hx < 0 ? '\\' : '/')),
-          fg: isWilting ? '#4a4422' : pal.jaw,
+          fg: pal.jaw,
           size: 13.5 * s
         });
       }
@@ -2244,7 +2364,7 @@
             x: outerX,
             y: outerY,
             char: outerChar,
-            fg: isWilting ? '#4a4422' : pal.jaw,
+            fg: pal.jaw,
             size: 14 * s
           });
 
@@ -2259,7 +2379,7 @@
               x: gx,
               y: gy,
               char: gChar,
-              fg: isWilting ? '#5a1924' : pal.inside,
+              fg: pal.inside,
               size: 13 * s
             });
           }
@@ -2272,7 +2392,7 @@
               x: tx,
               y: ty,
               char: '!',
-              fg: isWilting ? '#8c7d3a' : '#fff677',
+              fg: '#fff677',
               size: 12 * s
             });
           }
@@ -2287,7 +2407,7 @@
             x: toothX,
             y: toothY,
             char: toothChar,
-            fg: isWilting ? '#aba182' : pal.teeth,
+            fg: pal.teeth,
             size: 13.5 * s
           });
         }
@@ -2300,7 +2420,7 @@
             x: cx + c * 5 * s,
             y: fcy - 12 * s,
             char: (c % 2 === 0 ? '/' : '\\'),
-            fg: isWilting ? '#aba182' : pal.teeth,
+            fg: pal.teeth,
             size: 14 * s
           });
         }
@@ -2784,6 +2904,29 @@
      */
     settle(seconds = 12, step = 0.25) {
       for (let t = 0; t < seconds; t += step) this.simulator.updateMembers(step, 1.0, this.age);
+      if (this.bloom !== null) this.setBloom(this.bloom);
+    }
+
+    /**
+     * Regrow this individual from germination to targetAge by replaying its life at
+     * normal speed (same growth noise, life factor and member subcycles as in a garden).
+     * Deterministic for a given seed and genome, so scrubbing an age slider back and
+     * forth always shows the same plant at the same age.
+     */
+    growTo(targetAge, step = 1.0) {
+      targetAge = clamp(targetAge, 0.02, LIFE_END - 0.01);
+      const sim = this.simulator;
+      sim.rng = new PRNG((this.seed ^ 0x2545f491) >>> 0 || 1);
+      sim.clock = 0;
+      sim.initMembers();
+      this.clock = 0;
+      this.age = 0.02;
+      for (let guard = 0; this.age < targetAge && guard < 20000; guard++) {
+        this.age = Math.min(targetAge, this.age + this.agingDelta(step, 1.0));
+        this.clock += step;
+        sim.updateMembers(step, 1.0, this.age);
+      }
+      sim.seedRelease = 0;
       if (this.bloom !== null) this.setBloom(this.bloom);
     }
 
@@ -3306,7 +3449,7 @@
           const sim = plant.simulator;
           if (sim.seedRelease > 0) {
             if (this.lifecycle === 'reproduce') {
-              this.releaseSeeds(plant, x, sim.seedRelease * (2 + Math.round(plant.genome.flowering * 2)));
+              this.releaseSeeds(plant, x, sim.seedRelease * (1 + Math.round(plant.genome.flowering)));
             }
             sim.seedRelease = 0;
           }
