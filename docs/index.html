@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+  <meta name="theme-color" content="#050508">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Florametric — Parametric Living ASCII Flowers & Plants</title>
+  <meta name="description" content="A generative mathematical engine for glowing, living ASCII flowers and plants. Zero dependencies, 100% parametric, GitHub Pages ready.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <script>
+    window.__ERRORS__ = [];
+    window.addEventListener('error', e => {
+      const err = `ERROR: ${e.message} at ${e.filename}:${e.lineno}`;
+      console.error(err);
+      window.__ERRORS__.push(err);
+    });
+  </script>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="brand">
+      <span class="brand-glyph">✿</span>
+      <span class="brand-title">FLORAMETRIC</span>
+      <span class="brand-badge">MATH ENGINE</span>
+    </div>
+
+    <nav class="nav-tabs">
+      <button class="nav-btn active" data-tab="garden">
+        <span class="btn-icon">🌱</span> The Meadow
+      </button>
+      <button class="nav-btn" data-tab="studio">
+        <span class="btn-icon">🔬</span> Parametric Lab
+      </button>
+      <button class="nav-btn" data-tab="codex">
+        <span class="btn-icon">📖</span> Species Codex
+      </button>
+      <button class="nav-btn" data-tab="embed">
+        <span class="btn-icon">⌛</span> Meadow Architect & Embed
+      </button>
+    </nav>
+
+    <div class="nav-actions">
+      <button id="btn-clock-toggle" class="action-btn" title="Cycle Biological Time Speed">
+        <span class="icon">⏱️</span> <span class="lbl">Time: 1x</span>
+      </button>
+      <button id="btn-nourish-toggle" class="action-btn" title="Toggle Sunlight / Plant Food Nourish Mode">
+        <span class="icon">☀️</span> <span class="lbl">Nourish: Off</span>
+      </button>
+      <button id="btn-wind-toggle" class="action-btn" title="Toggle Wind Gusts">
+        <span class="icon">💨</span> <span class="lbl">Breeze: Med</span>
+      </button>
+      <button id="btn-sound-toggle" class="action-btn" title="Toggle Ambient Audio Chimes">
+        <span class="icon">🔔</span> <span class="lbl">Sound: Off</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Viewport Container -->
+  <main class="viewport">
+
+    <!-- VIEW 1: THE MEADOW (GARDEN) -->
+    <section id="view-garden" class="tab-view active">
+      <canvas id="garden-canvas"></canvas>
+      
+      <!-- Garden Overlay Prompt -->
+      <div class="garden-hud">
+        <div class="hud-pill">
+          <span class="pulse-dot"></span>
+          <span class="hud-text-desktop">Click soil to sow &bull; Click Dandelions to blow seeds &bull; Natural time blooms buds &bull; Shower Sunlight ☀️</span>
+          <span class="hud-text-mobile">Tap soil to sow &bull; Tap Dandelions to blow seeds &bull; Shower Sunlight ☀️</span>
+        </div>
+        <div class="garden-controls">
+          <button id="btn-sunlight-burst" class="hud-btn primary">Shower Sunlight ☀️</button>
+          <button id="btn-export-meadow" class="hud-btn highlight" title="Generate persistent time-anchored embed code for this meadow">Generate Meadow Code ⌛</button>
+          <button id="btn-clock-cycle" class="hud-btn" title="Cycle Biological Time Passing">Time: 1x ⏱️</button>
+          <button id="btn-flower-all" class="hud-btn">Bloom All ✿</button>
+          <button id="btn-clear-garden" class="hud-btn">Clear Garden</button>
+          <button id="btn-preset-wildflower" class="hud-btn">Plant Wildflower Meadow</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: THE PARAMETRIC LAB -->
+    <section id="view-studio" class="tab-view">
+      <div class="studio-layout">
+        
+        <!-- Live Plant Canvas Viewport -->
+        <div class="studio-display">
+          <canvas id="studio-canvas"></canvas>
+          
+          <div class="display-stats">
+            <span id="stat-leaves">Active Leaves: 4</span> &bull;
+            <span id="stat-energy">Leaf Energy: 1.05x</span> &bull;
+            <span id="stat-branch">Secondary Shoot: Active</span>
+          </div>
+
+          <!-- Quick Action Buttons -->
+          <div class="display-actions">
+            <button id="btn-studio-feed" class="export-btn" title="Shower specimen with sunlight to accelerate growth">
+              <span>☀️</span> Feed Sunlight
+            </button>
+            <button id="btn-copy-ascii" class="export-btn">
+              <span>📋</span> Copy Plain ASCII
+            </button>
+            <button id="btn-copy-tag" class="export-btn">
+              <span>💻</span> Copy &lt;florametric-plant&gt; Tag
+            </button>
+            <button id="btn-download-png" class="export-btn">
+              <span>💾</span> Download PNG
+            </button>
+          </div>
+        </div>
+
+        <!-- Parametric Controls Dock -->
+        <aside class="studio-panel">
+          <div class="panel-header">
+            <h3>Parametric DNA & Physics</h3>
+            <button id="btn-randomize-seed" class="seed-btn" title="Generate New DNA Seed">🎲 Randomize</button>
+          </div>
+
+          <div class="control-group">
+            <label for="select-species">Botanical Species</label>
+            <select id="select-species" class="ctrl-select">
+              <option value="sunflower">Golden Sunflower (Helianthus)</option>
+              <option value="hibiscus">Tropical Hibiscus (Rosa-sinensis)</option>
+              <option value="iris">Royal Purple Iris (Iris)</option>
+              <option value="thistle">Wild Thistle (Cirsium)</option>
+              <option value="marigold">French Marigold (Tagetes)</option>
+              <option value="daffodil">Golden Daffodil (Narcissus)</option>
+              <option value="rose">Velvet Rose (Rosa)</option>
+              <option value="dandelion">Dandelion Clock (Taraxacum)</option>
+              <option value="tulip">Garden Tulip (Tulipa)</option>
+              <option value="flytrap">Venus Flytrap (Dionaea)</option>
+            </select>
+          </div>
+
+          <!-- Biological Age Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-age">Biological Age / Lifecycle</label>
+              <span id="val-age" class="val-badge">100% (Mature Prime)</span>
+            </div>
+            <input type="range" id="slider-age" min="0.05" max="23.5" step="0.1" value="1.0" class="ctrl-slider">
+            <div class="growth-milestones">
+              <span>Sprout</span>
+              <span>Branching</span>
+              <span>20n Mature Prime</span>
+              <span>Senescence</span>
+            </div>
+          </div>
+
+          <!-- Flower Bloom Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-bloom">Blossom Bloom Expansion</label>
+              <span id="val-bloom" class="val-badge">Auto (100%)</span>
+            </div>
+            <input type="range" id="slider-bloom" min="0.0" max="1.0" step="0.01" value="1.0" class="ctrl-slider">
+          </div>
+
+          <!-- Stem Height Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-height">Shoot Max Height</label>
+              <span id="val-height" class="val-badge">380px</span>
+            </div>
+            <input type="range" id="slider-height" min="180" max="500" step="10" value="380" class="ctrl-slider">
+          </div>
+
+          <!-- Curvature / Lean Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-curvature">Stem Curvature / Phototropism</label>
+              <span id="val-curvature" class="val-badge">0.15</span>
+            </div>
+            <input type="range" id="slider-curvature" min="-1.0" max="1.0" step="0.05" value="0.15" class="ctrl-slider">
+          </div>
+
+          <!-- Wind Reactivity Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-wind">Wind Harmonic Sway</label>
+              <span id="val-wind" class="val-badge">0.60</span>
+            </div>
+            <input type="range" id="slider-wind" min="0.0" max="1.5" step="0.05" value="0.60" class="ctrl-slider">
+          </div>
+
+          <!-- Leaf Density Slider -->
+          <div class="control-group">
+            <div class="slider-header">
+              <label for="slider-leaf-density">Phyllotaxis Leaf Density</label>
+              <span id="val-leaf-density" class="val-badge">1.0x</span>
+            </div>
+            <input type="range" id="slider-leaf-density" min="0.5" max="2.0" step="0.1" value="1.0" class="ctrl-slider">
+          </div>
+
+          <!-- Pointer Interaction Mode -->
+          <div class="control-group">
+            <label for="select-pointer-mode">Pointer / Cursor Behavior</label>
+            <select id="select-pointer-mode" class="ctrl-select">
+              <option value="reach">Heliotropic Reach (Bends towards cursor)</option>
+              <option value="flinch">Thigmotropic Flinch (Bends away)</option>
+              <option value="none">No Pointer Reactivity</option>
+            </select>
+          </div>
+
+          <!-- Color Palette Dropdown -->
+          <div class="control-group">
+            <label for="select-palette">Chromatic Aesthetic</label>
+            <select id="select-palette" class="ctrl-select">
+              <option value="botanical">Glowing Botanical (Authentic Colors)</option>
+              <option value="phosphor">Matrix Phosphor Green</option>
+              <option value="amber">1982 Terminal Amber</option>
+              <option value="cyberpunk">Cyberpunk Neon</option>
+              <option value="monochrome">Pure Monochrome White</option>
+            </select>
+          </div>
+
+        </aside>
+      </div>
+    </section>
+
+    <!-- VIEW 3: SPECIES CODEX -->
+    <section id="view-codex" class="tab-view">
+      <div class="codex-container">
+        <div class="codex-header">
+          <h2>The Botanical Species Codex</h2>
+          <p>Procedural mathematical models rendered live with continuous harmonic physics.</p>
+        </div>
+        <div id="codex-grid" class="codex-grid">
+          <!-- Dynamically filled with animated cards -->
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: PERSISTENT MEADOW ARCHITECT & INTEGRATION GUIDE -->
+    <section id="view-embed" class="tab-view">
+      <div class="docs-container">
+        <div class="docs-header">
+          <h2>Time-Anchored Meadow Architect</h2>
+          <p>Generate embeddable ASCII meadow code anchored to a starting point in time (\(t_0\)). When embedded on your page or blog, plants continuously evolve in real-world time across days and weeks.</p>
+        </div>
+
+        <!-- Interactive Persistent Meadow Generator Dock -->
+        <div class="meadow-builder-card">
+          <div class="builder-split">
+            
+            <!-- Left: Builder Controls -->
+            <div class="builder-controls">
+              
+              <!-- 1. Starting Epoch t0 -->
+              <div class="control-group">
+                <div class="slider-header">
+                  <label for="gen-t0">Starting Point (t₀ Epoch)</label>
+                  <button type="button" id="btn-t0-now" class="mini-btn">Right Now</button>
+                </div>
+                <input type="datetime-local" id="gen-t0" class="ctrl-input">
+                <div class="t0-quick-presets">
+                  <button type="button" class="preset-pill active" data-offset="0">Now</button>
+                  <button type="button" class="preset-pill" data-offset="-43200000">-12h</button>
+                  <button type="button" class="preset-pill" data-offset="-86400000">-1d</button>
+                  <button type="button" class="preset-pill" data-offset="-259200000">-3d</button>
+                  <button type="button" class="preset-pill" data-offset="-604800000">-1w</button>
+                </div>
+              </div>
+
+              <!-- 2. Growth / Time Scale -->
+              <div class="control-group">
+                <label for="gen-speed">Biological Growth Rate</label>
+                <select id="gen-speed" class="ctrl-select">
+                  <option value="24h" selected>Real-Time: 24-Hour Growth (1 day to mature bloom)</option>
+                  <option value="3d">Real-Time: 3-Day Growth (3 days to mature bloom)</option>
+                  <option value="7d">Real-Time: 1-Week Garden (7 days to mature bloom)</option>
+                  <option value="30d">Real-Time: 1-Month Garden (30 days to mature bloom)</option>
+                  <option value="1h">Accelerated: 1-Hour Growth</option>
+                  <option value="0.1">Slow Living: 0.1x Speed (~7 min growth)</option>
+                  <option value="0.01">Atmospheric: 0.01x Speed (~1.1 hr growth)</option>
+                  <option value="1.0">Standard Live Engine: 1.0x Speed</option>
+                </select>
+              </div>
+
+              <!-- 3. Plant Count -->
+              <div class="control-group">
+                <div class="slider-header">
+                  <label for="gen-count">Flower Count</label>
+                  <span id="val-gen-count" class="val-badge">7 plants</span>
+                </div>
+                <input type="range" id="gen-count" min="3" max="15" step="1" value="7" class="ctrl-slider">
+              </div>
+
+              <!-- 4. Species Selection Pills -->
+              <div class="control-group">
+                <label>Botanical Species in Meadow</label>
+                <div id="gen-species-pills" class="species-chip-grid">
+                  <!-- dynamic species toggle buttons -->
+                </div>
+              </div>
+
+              <!-- 5. Palette and Seed -->
+              <div class="builder-row-split">
+                <div class="control-group">
+                  <label for="gen-palette">Chromatic Palette</label>
+                  <select id="gen-palette" class="ctrl-select">
+                    <option value="botanical" selected>Glowing Botanical</option>
+                    <option value="phosphor">Matrix Phosphor</option>
+                    <option value="amber">1982 Amber</option>
+                    <option value="cyberpunk">Cyberpunk Neon</option>
+                    <option value="monochrome">Pure Monochrome</option>
+                  </select>
+                </div>
+
+                <div class="control-group">
+                  <label for="gen-seed">Master Genetic Seed</label>
+                  <div class="seed-row">
+                    <input type="number" id="gen-seed" value="42" class="ctrl-input">
+                    <button type="button" id="btn-gen-random-seed" class="seed-btn" title="Randomize Genetic DNA Seed">🎲</button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Right: Live Time-Anchored Preview -->
+            <div class="builder-preview-dock">
+              <div class="preview-hud-top">
+                <div class="preview-status-pill">
+                  <span class="pulse-dot"></span>
+                  <span id="gen-preview-time-title">State at Current Time</span>
+                </div>
+                <!-- Time-Travel scrub testing -->
+                <div class="time-scrub-group">
+                  <span class="scrub-title">Simulate Revisit:</span>
+                  <div class="scrub-pills">
+                    <button type="button" class="scrub-pill active" data-shift="0">Now</button>
+                    <button type="button" class="scrub-pill" data-shift="43200000">+12h</button>
+                    <button type="button" class="scrub-pill" data-shift="86400000">+1d</button>
+                    <button type="button" class="scrub-pill" data-shift="259200000">+3d</button>
+                    <button type="button" class="scrub-pill" data-shift="604800000">+1w</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="builder-canvas-wrap">
+                <canvas id="gen-preview-canvas"></canvas>
+              </div>
+
+              <div class="preview-stats-bar">
+                <span id="gen-stat-elapsed">Elapsed: 0.0 hrs</span> &bull;
+                <span id="gen-stat-stage">Stage: Sprouting Seedlings</span> &bull;
+                <span id="gen-stat-avg-age">Avg Age: 0.05</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Code Output Tabs -->
+          <div class="code-export-dock">
+            <div class="export-nav-tabs">
+              <button type="button" class="exp-tab active" data-format="webcomponent">&lt;florametric-meadow&gt; Web Component</button>
+              <button type="button" class="exp-tab" data-format="vanilla">Vanilla JavaScript API</button>
+              <button type="button" class="exp-tab" data-format="url">Shareable Meadow URL</button>
+            </div>
+
+            <div class="code-box-container">
+              <pre><code id="gen-code-output"></code></pre>
+              <button type="button" id="btn-copy-gen-code" class="copy-btn">
+                <span>📋</span> Copy Snippet
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="docs-card">
+          <h3>Option 1: Drop-In Web Component (Zero JavaScript Needed)</h3>
+          <p>Drop the script into your <code>&lt;head&gt;</code> and use the custom element anywhere in your HTML:</p>
+          <pre><code>&lt;!-- 1. Include the standalone library --&gt;
+&lt;script src="https://shamsghani.github.io/florametric/florametric.js"&gt;&lt;/script&gt;
+
+&lt;!-- 2. Embed an animated, cursor-reactive flower or persistent meadow --&gt;
+&lt;florametric-meadow speed="24h" plant-count="7" palette="botanical" interactive&gt;&lt;/florametric-meadow&gt;
+&lt;florametric-plant type="sunflower" age="1.0" bloom="1.0" interactive&gt;&lt;/florametric-plant&gt;</code></pre>
+        </div>
+
+        <div class="docs-card">
+          <h3>Option 2: Vanilla JavaScript API (Custom Canvas or Garden)</h3>
+          <p>Create an interactive garden or persistent meadow programmatically:</p>
+          <pre><code>import { createPersistentMeadow, AsciiPlant, AsciiGarden } from './florametric.js';
+
+// Create persistent time-anchored garden
+const meadow = createPersistentMeadow('#my-canvas', {
+  startTime: Date.now(),
+  speed: '24h',
+  plantCount: 7,
+  palette: 'botanical'
+});</code></pre>
+        </div>
+
+        <div class="docs-card">
+          <h3>Option 3: Static ASCII Text Generator (For READMEs & Terminal CLIs)</h3>
+          <p>Generate pure text strings with no DOM or canvas needed:</p>
+          <pre><code>const textArt = Florametric.generateString({
+  type: 'sunflower',
+  age: 1.0,
+  bloom: 1.0
+});
+console.log(textArt);</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">Copied to clipboard!</div>
+
+  <script src="florametric.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
