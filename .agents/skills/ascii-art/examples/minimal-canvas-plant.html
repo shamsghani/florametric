@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Minimal Procedural ASCII Flower (Canvas Bloom Engine)</title>
+  <style>
+    body {
+      margin: 0;
+      background: #050508;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      color: #8a8a9e;
+    }
+    canvas {
+      touch-action: none;
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+      border-radius: 8px;
+    }
+    .hint {
+      margin-top: 12px;
+      font-size: 12px;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="c" width="400" height="520"></canvas>
+  <div class="hint">Move mouse or touch to attract stem • Watch logistic blooming & breeze sway</div>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const width = 400;
+    const height = 520;
+    const groundY = 480;
+
+    let age = 0.0;
+    let pointer = { x: width / 2, y: 100, active: false };
+
+    // Track mouse & touch heliotropic light source
+    const updatePointer = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      pointer.x = clientX - rect.left;
+      pointer.y = clientY - rect.top;
+      pointer.active = true;
+    };
+    window.addEventListener('mousemove', updatePointer);
+    window.addEventListener('touchstart', updatePointer, { passive: true });
+    window.addEventListener('touchmove', updatePointer, { passive: true });
+
+    function drawRotatedGlyph(char, x, y, angle, color, size = 15) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.font = `bold ${size}px "JetBrains Mono", Consolas, monospace`;
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(char, 0, 0);
+      ctx.restore();
+    }
+
+    function renderPlant(time) {
+      // 1. Logistic Stem Growth Kinetics
+      const maxH = 340;
+      const currentH = maxH * (1 - Math.exp(-4 * Math.min(1.0, age))) / (1 - Math.exp(-4));
+      const segments = 24;
+      const step = currentH / segments;
+
+      // 2. Harmonic Euler Wind Oscillations
+      const windWave = Math.sin(time * 1.5) * 16 + Math.sin(time * 3.2) * 5;
+
+      // 3. Heliotropism (Phototropic Reach towards cursor)
+      const apexDx = pointer.x - (width / 2);
+      const reachFactor = pointer.active ? Math.max(-40, Math.min(40, apexDx * 0.25)) : 0;
+
+      let prevX = width / 2;
+      let prevY = groundY;
+      const spine = [{ x: prevX, y: prevY, angle: -Math.PI / 2 }];
+
+      for (let i = 1; i <= segments; i++) {
+        const t = i / segments;
+        const flex = Math.pow(t, 1.4); // Stiff base, flexible apex
+        const x = (width / 2) + (windWave + reachFactor) * flex + Math.sin(i * 0.4) * 3;
+        const y = groundY - (i * step);
+        const angle = Math.atan2(y - prevY, x - prevX);
+
+        spine.push({ x, y, angle });
+        prevX = x;
+        prevY = y;
+      }
+
+      // Draw Stem Spine
+      for (let i = 1; i < spine.length; i++) {
+        const pt = spine[i];
+        const t = i / spine.length;
+        const char = (t < 0.2) ? '#' : (t < 0.6) ? '!' : '|';
+        const color = (t < 0.3) ? '#2e7d32' : '#55e64b';
+        drawRotatedGlyph(char, pt.x, pt.y, pt.angle + Math.PI / 2, color, 14);
+
+        // Axillary Bilateral Leaves
+        if (i === 8 || i === 14) {
+          const leafScale = Math.min(1.0, Math.max(0.1, (age - (i / 30)) * 2));
+          if (leafScale > 0.15) {
+            const leafAngleL = pt.angle - 0.9;
+            const leafAngleR = pt.angle + 0.9;
+            const lx = pt.x + Math.cos(leafAngleL) * 18 * leafScale;
+            const ly = pt.y + Math.sin(leafAngleL) * 18 * leafScale;
+            const rx = pt.x + Math.cos(leafAngleR) * 18 * leafScale;
+            const ry = pt.y + Math.sin(leafAngleR) * 18 * leafScale;
+            drawRotatedGlyph('~{', lx, ly, leafAngleL, '#4caf50', 13 * leafScale);
+            drawRotatedGlyph('}~', rx, ry, leafAngleR, '#4caf50', 13 * leafScale);
+          }
+        }
+      }
+
+      // 4. Apical Flower Anthesis (Bloom Expansion)
+      if (age > 0.4) {
+        const apex = spine[spine.length - 1];
+        const bloomProgress = Math.min(1.0, (age - 0.4) / 0.6); // 0 to 1
+        const smoothBloom = 3 * bloomProgress * bloomProgress - 2 * bloomProgress * bloomProgress * bloomProgress;
+
+        // Calyx Sepals
+        drawRotatedGlyph('\\v/', apex.x, apex.y + 4, apex.angle + Math.PI / 2, '#388e3c', 13);
+
+        // Ray Petals (Sunflower / Daisy Rosette: 12 petals)
+        const petalCount = 12;
+        const petalRadius = 14 + smoothBloom * 32;
+        for (let p = 0; p < petalCount; p++) {
+          const theta = (p / petalCount) * Math.PI * 2 + (time * 0.1);
+          const px = apex.x + Math.cos(theta) * petalRadius;
+          const py = apex.y + Math.sin(theta) * petalRadius;
+          const petalChar = (p % 2 === 0) ? '%' : '8';
+          drawRotatedGlyph(petalChar, px, py, theta + Math.PI / 2, '#ffbe28', 14 * smoothBloom);
+        }
+
+        // Bounded Golden Ratio Phyllotaxis Seed Disc
+        const discCount = Math.floor(smoothBloom * 24);
+        const maxDiscRadius = petalRadius * 0.55; // STRICTLY CONFINED
+        for (let d = 0; d < discCount; d++) {
+          const r = Math.min(maxDiscRadius - 2, 3.2 * Math.sqrt(d));
+          const phi = d * 2.399963;
+          const dx = apex.x + Math.cos(phi) * r;
+          const dy = apex.y + Math.sin(phi) * r;
+          const discChar = (d < 6) ? '#' : '*';
+          drawRotatedGlyph(discChar, dx, dy, 0, '#ffa000', 11);
+        }
+      }
+
+      // Soil Grass Tufts
+      for (let gx = 40; gx <= width - 40; gx += 20) {
+        const sway = Math.sin(time * 2 + gx) * 3;
+        drawRotatedGlyph('W', gx + sway, groundY, 0, '#2e7d32', 12);
+      }
+    }
+
+    // Animation Loop with Dual-Pass Screen-Space Bloom
+    let lastTime = performance.now();
+    function animate(now) {
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      age += dt * 0.15; // Biological aging
+
+      // Clear
+      ctx.fillStyle = '#050508';
+      ctx.fillRect(0, 0, width, height);
+
+      // Pass 1: Diffuse Hardware Bloom Glow
+      ctx.save();
+      ctx.filter = 'blur(6px)';
+      ctx.globalAlpha = 0.45;
+      renderPlant(now * 0.001);
+      ctx.restore();
+
+      // Pass 2: Crisp Sharp Foreground Glyphs
+      ctx.save();
+      ctx.globalAlpha = 1.0;
+      renderPlant(now * 0.001);
+      ctx.restore();
+
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
