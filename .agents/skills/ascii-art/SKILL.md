@@ -1,230 +1,175 @@
 ---
 name: ascii-art
-description: Build procedural, animated, glowing, and interactive graphics drawn entirely with ASCII and Unicode symbols. Covers continuous mathematical modeling (logistic growth curves, phyllotaxis, polar geometry, simplex noise), the rotated glyph language (tangent-aligned characters, density-based glyph selection), biological life-cycle state machines (subcycles, dependency rules, 20n mature plateaus), physics (harmonic Euler wind sway, inverse-kinematics heliotropism, drifting parachute particles), screen-space hardware bloom pass, and multi-layer palette rendering across HTML5 Canvas and terminal string grids. Use whenever someone wants to draw, animate, or simulate anything with ASCII characters, Unicode text art, terminal visual effects, living text-based nature, or glowing generative typography.
+description: Build procedural, animated, glowing, and interactive graphics drawn entirely with ASCII and Unicode symbols across any domain: architectural structures, natural landscapes, true 3D polyhedra with z-buffering, 2:1 axonometric isometric worlds, and continuous biological botany. Covers the rotated glyph language, mathematical curves (logistic growth, phyllotaxis, simplex noise, multi-octave terrain, 3D rotation matrices, Lambertian lighting), physics (Euler wind, gravity, rain/snow particles, heliotropism), screen-space hardware bloom, and multi-layer palette rendering across HTML5 Canvas and terminal string grids. Use whenever someone wants to draw, animate, or simulate anything with ASCII characters, Unicode text art, terminal visual effects, living nature, or glowing generative typography.
 license: MIT
 metadata:
   opencode/slash: "true"
 ---
 
-# Procedural ASCII Graphics & Generative Glyph Botany
+# Modular Procedural ASCII & Unicode Graphics Engine
 
-This skill teaches how to render living, procedural, animated, and interactive graphics using ASCII and Unicode symbols.
+This skill is a modular architecture for generating living, procedural, animated, and interactive assets drawn entirely with ASCII and Unicode glyphs.
 
-Instead of traditional ASCII art—which treats characters as coarse pixels approximating static pre-baked bitmaps—this system models graphics as **continuous vector strokes, polar curves, and living organs**, using characters as directional brushstrokes, anatomical boundaries, and light emitters.
+Instead of traditional ASCII art—which treats characters as brightness pixels approximating pre-baked bitmap images—this engine models graphics as **continuous vector strokes, geometric boundaries, and structural elements**, whether rendering a 3D rotating polyhedron, an isometric skyscraper complex, an atmospheric mountain landscape, or a living biological flower.
 
 ```
-       .      .   .   .  .
-    .   \   /   .   /   .   .
-     \   %#%   /   /  .
-  .---  #*8*#  ---.       .  '
-     /   %#%   \   \  .
-    '   /   \   '   \   '   '
-       '      '   '   '  '
-              \v/
-              +!+
-              !|!
-          {-( !|! )-}
-              !|!
-            ~/ | \~
-           ~/  |  \~
-          (    |    )
-         ~~~~~---~~~~~
+       .---.                   /\                      / \
+      /     \                 /  \                    /   \
+     |       |               /\  /\                  |     |
+    .---------.-+           /  \/  \                .-------.
+    | [ ] [ ] | |           |  ||  |                | [+][+] |
+    |=========| |           \  /\  /                |=======|
+    | [+][+]  | |            \/  \/                 | [###] |
+   =================      =================      ===============
+     Architectural            Isometric            3D Shaded &
+       Elevation                Block                Botany
 ```
 
 ---
 
-## 1. The Core Philosophy: Vector Strokes, Not Pixel Blocks
+## 1. Modular System Architecture
 
-Traditional ASCII art treats characters as a fixed grid of brightness values (`@%#*+=-:. `). While suitable for converting JPEG images to text, it produces rigid, lifeless results.
+The engine is decomposed into **Core Primitives** and plug-and-play **Domain Modules**:
 
-**The Procedural ASCII Philosophy:**
-1. **Characters are Vector Brushstrokes**: A character is chosen because its geometry mirrors the curve's local tangent vector, curvature, or organ function.
-2. **Zero Pre-Baked Art**: No static ASCII templates. Stems, petals, leaves, and teeth are synthesized in real time from mathematical functions.
-3. **Continuous Coordinates with Subpixel Rotation**: In HTML5 Canvas, characters are placed at floating-point world coordinates and rotated to match the local curve derivative $\theta = \operatorname{atan2}(dy, dx)$.
-4. **Organic Life-Cycle State Machines**: Objects aren't static loops; they are born with heritable genetic code, grow via continuous logistic equations, blossom, hold mature prime plateaus for extended durations ($20n$), wilt organically, set seed, and die.
-
----
-
-## 2. The Rotated Glyph Language
-
-Every character has geometric and structural traits. Match characters to their physical and anatomical roles:
-
-| Anatomical Role | Glyph Vocabulary | Selection Rule / Geometry |
-| :--- | :--- | :--- |
-| **Stem Apex / Sprout** | `.`, `'`, `,`, `^`, `!` | Low mass, thin tip, beginning of shoot elongation |
-| **Stem Backbone** | `\|`, `!`, `(`, `)`, `/`, `\` | Directional stroke matching tangent angle $\theta$ |
-| **Lignified Base** | `#`, `%`, `&`, `8`, `O` | High visual weight, dense fiber packing near soil |
-| **Nodes & Axils** | `+`, `*`, `%`, `#`, `&` | Junction points where shoots, leaves, and branches diverge |
-| **Branch Shoots** | `/`, `\`, `(`, `)`, `+`, `~` | Bilateral divergence from nodes ($+1$ right, $-1$ left) |
-| **Leaves / Foliage** | `{`, `}`, `(`, `)`, `~`, `v`, `^`, `>` | Curved enclosing brackets forming leaf blades and tips |
-| **Calyx / Sepals** | `\v/`, `\w/`, `\Y/`, `(Y)`, `\|/` | Cup-shaped brackets holding the base of the flower head |
-| **Ray Petals** | `%`, `8`, `@`, `O`, `&`, `*`, `c`, `s` | Radial lobes distributed around polar angle $\theta$ |
-| **Disc Florets / Heart** | `#`, `*`, `&`, `8`, `o`, `.` | Dense phyllotaxis spiral lattice strictly bounded within petals |
-| **Marginal Cilia / Teeth**| `\|`, `/`, `\`, `^`, `v`, `!` | Spines along contour edges (e.g. Venus flytrap jaws, thistle) |
-| **Seed Pappus / Parachute**| `✦`, `*`, `+`, `.` | Lightweight radial stars designed to detach and drift on wind vectors |
-
-> [!IMPORTANT]
-> **Sunflower Seed Disc Containment Rule:**
-> When drawing composite flowers (sunflowers, daisies, asters), disc florets ($r_{\text{disc}} = c \sqrt{i}$) must be strictly bounded within the inner perimeter of the ray petals:
-> $$r_{\text{disc}} \le R_{\text{petal\_inner}} - \delta$$
-> Never let seed florets bleed outside the petal ring.
-
----
-
-## 3. Continuous Mathematical Botany
-
-Procedural characters should be positioned using continuous mathematical formulations:
-
-### A. Logistic Growth Kinetics
-Stems elongate smoothly without sudden visual popping:
-$$L(t) = L_{\max} \cdot \frac{1 - e^{-k t}}{1 - e^{-k}}$$
-- $t \in [0, 1]$: Normalized biological vegetative age.
-- $k \approx 4.0$: Steepness coefficient producing rapid initial juvenile growth tapering into steady adult maturity.
-
-### B. Polar Coordinate Petal Lobes
-Petal perimeters follow polar rose harmonics:
-$$r(\theta) = R_{\text{base}} + A \cdot \cos(k \theta)$$
-- $k = 5$ or $7$: Rose, hibiscus, mallow
-- $k = 6$: Star tepals (daffodil, lily)
-- $k = 16$ or $24$: Sunflower, daisy, aster
-
-Multi-layered rosettes evaluate multiple concentric passes with angular phase offsets $\Delta \theta = \frac{\pi}{k}$.
-
-### C. Sunflower Phyllotaxis (Golden Ratio Spiraling)
-For seed heads and compact succulent rosettes, place seeds using the Golden Angle ($137.507764^\circ \approx 2.399963\text{ rad}$):
-$$r_i = c \sqrt{i}, \quad \theta_i = i \times 137.507764^\circ$$
-Select dense glyphs (`#`, `*`, `&`, `8`) near the center and lighter florets (`o`, `.`) near the perimeter.
-
-### D. Harmonic Euler Wind Kinematics
-Create natural swaying by superimposing sinusoidal traveling waves with power-law height scaling:
-$$W(y, x, t) = \sum_{m=1}^3 A_m \sin(\omega_m t + k_m y - c_m x) \cdot \left(\frac{y}{H}\right)^{1.4}$$
-- The exponent $1.4$ anchors the roots rigidly at $y=0$ while flexing the apex.
-- The spatial offset $-c_m x$ causes gusts to visibly roll across a field from left to right.
-
-### E. Pointer Heliotropism / Phototropism
-Stems naturally reach towards light sources (cursor or touch point) using inverse kinematics with elastic restoring tension:
-$$\Delta \theta_{\text{light}} = \kappa \cdot \operatorname{atan2}(x_{\text{pointer}} - x_{\text{apex}}, y_{\text{pointer}} - y_{\text{apex}}) \cdot \frac{1}{1 + \frac{d^2}{R_{\text{reach}}^2}}$$
-
----
-
-## 4. Biological Lifecycles & State Machines
-
-Never let plants snap into existence or die all at once. Implement a multi-tiered lifecycle system:
-
-### A. The 20n Mature Prime Plateau
-If a plant takes $n$ time units (e.g. 30 seconds or 24 hours) to grow from seedling to full bloom, it **must remain at full height in prime bloom for at least $20n$ duration** before initiating any senescence.
-- Age $[0.0, 1.0]$: Vegetative elongation, bud formation, petal anthesis.
-- Age $[1.0, 21.0]$: The $20n$ Mature Prime Plateau (continuous flowering, breeze swaying, zero browning).
-- Age $[21.0, 23.0]$: Natural senescence (chlorophyll breakdown, seed dispersal).
-- Age $> 23.0$: Soil decomposition, triggering a generational reseed.
-
-### B. Member Subcycles & Dependency Graphs
-Every organ has its own subcycle:
-```mermaid
-stateDiagram-v2
-    [*] --> Dormant
-    Dormant --> Budding : Stem Reaches Axil Node
-    Budding --> Mature : Photosynthesis
-    Mature --> Wilting : Nutrient Depletion / Age
-    Wilting --> Dead : Chlorosis
-    Dead --> Resprouting : Root Spring Energy
-    Resprouting --> Mature
+```
+ascii-art/
+├── SKILL.md                          <- Master Architecture & Selection Guide
+├── core/
+│   ├── glyph-matrix.md               <- Directional tangents, density ramps, box-drawing
+│   ├── rasterizer-and-zbuffer.md     <- Depth testing, canvas subpixel rotation, bloom
+│   └── camera-and-projection.md      <- Orthographic, 3D Perspective & 2:1 Isometric
+├── modules/
+│   ├── architecture.md               <- Facades, arches, trusses, masonry, floorplans
+│   ├── landscapes.md                 <- Multi-octave terrain, animated waves, reflections
+│   ├── three-dimensional.md          <- 3D vertices, rotation matrices, Lambertian shading
+│   ├── isometric.md                  <- Diamond tiles, extruded blocks, painter's sorting
+│   └── botany-and-organic.md         <- Logistic growth, phyllotaxis, 20n prime plateaus
+└── examples/
+    ├── isometric-building.html       <- Interactive Canvas isometric tower with lighting
+    ├── three-d-spinning-cube.js      <- Terminal CLI rotating 3D shaded cube (z-buffer)
+    ├── landscape-terrain.html        <- Multi-octave mountains, animated water & rain
+    ├── minimal-canvas-plant.html     <- Blooming ASCII flower with hardware bloom glow
+    └── terminal-tree.js              <- Zero-dependency Node.js CLI procedural botany
 ```
 
-**The Branch Dependency Rule:**
-An axillary branch must never wither prematurely. A branch enters senescence and dies **if and only if all flowers and all leaves attached to that branch are already dead**.
+---
 
-### C. Heritable Genomes & Reseeding Diversity
-When a plant finishes its lifecycle, it drops seeds that sprout new plants. The new plant must **not** be a clone. Derive its parameters from a heritable genome with Gaussian mutation:
+## 2. Quick Domain Selection Matrix
+
+Match your project goal to the dedicated module and core components:
+
+| Desired Asset / Scene | Primary Module | Core Components Used | Typical Output Target |
+| :--- | :--- | :--- | :--- |
+| **Buildings, Facades, Bridges** | [`modules/architecture.md`](./modules/architecture.md) | Box-drawing sets, orthographic projection | Canvas or Markdown diagrams |
+| **Mountains, Oceans, Weather** | [`modules/landscapes.md`](./modules/landscapes.md) | Multi-octave heightmaps, wave harmonics | Animated Canvas / Terminal |
+| **Rotating Solids, Donut, 3D Mesh**| [`modules/three-dimensional.md`](./modules/three-dimensional.md) | Perspective camera, Z-buffer, Lambertian lighting | Terminal CLI / Canvas |
+| **SimCity / RPG World, Towers** | [`modules/isometric.md`](./modules/isometric.md) | 2:1 isometric projection, painter's depth sorting | Canvas or Web Component |
+| **Living Flowers, Plants, Vines**| [`modules/botany-and-organic.md`](./modules/botany-and-organic.md) | Rotated tangents, logistic kinetics, 20n plateaus | Canvas with hardware bloom |
+
+---
+
+## 3. The Universal Engineering Invariants
+
+Regardless of domain, every procedural ASCII creation adheres to five universal rules:
+
+### A. Vector Strokes, Not Pixel Blocks
+Characters are selected according to **direction** (local curve tangent $\theta$), **role** (backbone, node, leaf, petal, column, lintel, water wave), and **density** (fill weight). Never convert an image with a threshold loop when a mathematical function can draw it organically.
+
+### B. Aspect Ratio Compensation ($1:2$ Terminal vs $1:1$ Canvas)
+In monospaced text environments (terminals, code editors), character cells are twice as tall as they are wide. To prevent circles and diagonals from squishing:
+$$x_{\text{terminal}} = \lfloor x_{\text{world}} \times 2.0 \rfloor, \quad y_{\text{terminal}} = \lfloor y_{\text{world}} \rfloor$$
+
+### C. Z-Buffer Depth Testing for 3D & Occlusion
+When objects overlap in 3D space, store per-cell floating-point depth in `zBuffer[row][col]`. Only draw an incoming character if:
+$$z_{\text{incoming}} > z_{\text{buffer}}[\text{row}][\text{col}]$$
+In isometric space, achieve the same result via the **Painter's Key Invariant**:
+$$\text{DepthKey} = (u + v) \times 1000 + z_{\text{elevation}}$$
+Render blocks strictly sorted from lowest key to highest key.
+
+### D. Dual-Pass Hardware Screen-Space Bloom
+ASCII glyphs achieve a glowing CRT phosphor aesthetic using native Canvas 2D filters without costly post-processing shaders:
 ```javascript
-const childGenome = {
-  vigor: parent.vigor * (1.0 + (Math.random() - 0.5) * 0.15),
-  maxHeight: parent.maxHeight * (1.0 + (Math.random() - 0.5) * 0.12),
-  curvature: parent.curvature + (Math.random() - 0.5) * 0.20,
-  branchingTendency: Math.max(0.2, parent.branchingTendency + (Math.random() - 0.5) * 0.1),
-  petalHueShift: parent.petalHueShift + (Math.random() - 0.5) * 0.08
-};
+// Pass 1: Diffuse glow underlay
+ctx.save();
+ctx.filter = 'blur(6px)';
+ctx.globalAlpha = 0.40;
+drawPrimitives(ctx);
+ctx.restore();
+
+// Pass 2: Sharp foreground
+ctx.save();
+ctx.globalAlpha = 1.0;
+drawPrimitives(ctx);
+ctx.restore();
 ```
 
----
-
-## 5. Rendering Pipeline & Visual Engineering
-
-### A. HTML5 Canvas: Subpixel Rotated Glyphs
-For smooth 60 FPS animation on desktop and mobile:
-```javascript
-function drawRotatedGlyph(ctx, char, x, y, angle, color, fontSize = 14, fontFamily = 'JetBrains Mono, monospace') {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-  ctx.font = `bold ${fontSize}px ${fontFamily}`;
-  ctx.fillStyle = color;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(char, 0, 0);
-  ctx.restore();
-}
-```
-
-### B. Dual-Pass Hardware Screen-Space Bloom
-ASCII symbols glow with a neon phosphor aesthetic without expensive post-processing shaders:
-```javascript
-function renderWithBloom(ctx, renderCallback) {
-  // Pass 1: Background glow layer
-  ctx.save();
-  ctx.filter = 'blur(6px)';
-  ctx.globalAlpha = 0.45;
-  renderCallback(ctx);
-  ctx.restore();
-
-  // Pass 2: Foreground crisp glyph layer
-  ctx.save();
-  ctx.globalAlpha = 1.0;
-  renderCallback(ctx);
-  ctx.restore();
-}
-```
-
-### C. High-DPI Mobile Performance Rule
-Modern smartphones have $3\times$ pixel ratios. Always clamp DPR to 2.0 to avoid mobile GPU fillrate collapse:
+### E. High-DPI Mobile Performance Rule
+Modern smartphones feature $3\times$ retina pixel densities. Always clamp DPR to $2.0$ to avoid mobile GPU fillrate collapse:
 ```javascript
 const dpr = Math.min(2.0, window.devicePixelRatio || 1);
-canvas.width = cssWidth * dpr;
-canvas.height = cssHeight * dpr;
+canvas.width = rect.width * dpr;
+canvas.height = rect.height * dpr;
 ctx.scale(dpr, dpr);
 ```
 
-### D. Bottom-Up Senescence Palette Shifting
-Tissue browns from the root upward. Compute senescence as a function of height fraction:
-$$\text{chlorosis}(y) = \operatorname{clamp}\left(\frac{\text{plantAge} - 21.0}{2.0} - \frac{y}{H} \cdot 0.8, 0, 1\right)$$
-Interpolate colors from vibrant emerald (`#55e64b`) $\to$ golden yellow (`#ffbe28`) $\to$ autumn brown (`#8d6e63`).
+---
+
+## 4. Module Deep Dives & Documentation
+
+1. **[Core Glyph Matrix](./core/glyph-matrix.md)**
+   - 16-sector tangent angle quantization table.
+   - Calibrated 10-tier, 70-character, and Unicode block density ramps.
+   - Unicode box-drawing character vocabulary (`─`, `│`, `┌`, `┐`, `═`, `║`, `╔`, `╗`, `╱`, `╲`).
+
+2. **[Core Rasterizer & Z-Buffer Engine](./core/rasterizer-and-zbuffer.md)**
+   - Unified `AsciiRasterizer` class with 3D Bresenham line and scanline polygon rasterization.
+   - Dual-pass hardware screen-space bloom implementation.
+   - 24-bit TrueColor ANSI escape code serialization (`\x1b[38;2;R;G;Bm`).
+
+3. **[Core Camera & Projection](./core/camera-and-projection.md)**
+   - Orthographic parallel ray projection for floor plans and technical drawings.
+   - Perspective 3D camera transformation with pitch, yaw, roll, and focal length division.
+   - 2:1 axonometric isometric projection equations and inverse screen-to-world picking.
+
+4. **[Architectural Design Module](./modules/architecture.md)**
+   - Multi-story elevation stratification (base, shaft, capital).
+   - Fenestration grids and procedural window patterns (`[+]`, `[*]`, `[=]`, `[#]`).
+   - Semicircular Roman arches and Gothic pointed lancet vaults.
+   - Structural trusses (Warren, Pratt, Howe) and suspension bridge catenaries.
+
+5. **[Landscapes & Atmospheric Nature Module](./modules/landscapes.md)**
+   - Multi-octave fractal terrain heightmaps.
+   - 3-plane atmospheric perspective and parallax depth fog.
+   - Dynamic ocean wave traveling harmonics with specular sun reflection columns.
+   - Rain and snow weather particle physics.
+
+6. **[3D Wireframes & Shaded Solids Module](./modules/three-dimensional.md)**
+   - Polyhedral vertex/face mesh representations.
+   - 3D Euler matrix rotation transformations.
+   - Lambertian diffuse lighting ($I = \max(0, \vec{N} \cdot \vec{L})$) mapped to ASCII density ramps.
+   - Back-face culling optimization.
+
+7. **[Isometric Worlds & Axonometric Blocks Module](./modules/isometric.md)**
+   - The 2:1 diamond grid coordinates $(u, v) \to (x, y)$.
+   - 3-face shaded block primitives (lit top, shaded left, mid-tone right).
+   - Painter's depth sorting key: $\text{DepthKey} = (u + v) \times 1000 + h$.
+   - Multi-level staircases, ramps, and fluted column colonnades.
+
+8. **[Botany & Organic Nature Module](./modules/botany-and-organic.md)**
+   - Continuous logistic shoot elongation kinetics: $L(t) = L_{\max} \frac{1 - e^{-kt}}{1 - e^{-k}}$.
+   - Rotated tangent glyph language for vascular stems and curved foliage.
+   - Polar petal rosettes and Fermat's phyllotaxis Golden Angle seed heads.
+   - The 20n mature prime plateau and organ subcycles.
+   - Traveling Euler wind harmonics and pointer heliotropism.
 
 ---
 
-## 6. Zero-DOM Terminal String Grid Mode
+## 5. Executable Examples Directory
 
-For CLI tools, terminal dashboards, and text art, render onto a 2D spatial text buffer:
+Every module is accompanied by an executable reference implementation:
 
-1. **Aspect Ratio Compensation**: Terminal character cells are typically twice as tall as they are wide ($1:2$ aspect ratio). Scale horizontal coordinates by $2.0$ to prevent circles from flattening into ellipses:
-   $$x_{\text{grid}} = \lfloor x_{\text{world}} \times 2.0 \rfloor, \quad y_{\text{grid}} = \lfloor y_{\text{world}} \rfloor$$
-2. **Buffer Painting Order (Painter's Algorithm)**:
-   - Layer 0: Soil line and ambient grass (`.`, `,`, `"`, `~`)
-   - Layer 1: Stem backbone (`|`, `/`, `\`)
-   - Layer 2: Axillary branches and leaves (`{`, `}`, `~`)
-   - Layer 3: Flowers, petals, and seed discs (`%`, `#`, `@`, `*`)
-   - Layer 4: Floating dandelion parachute seeds (`✦`, `+`)
-3. **ANSI 24-Bit Color Serialization**:
-   Wrap characters in ANSI sequences: `\x1b[38;2;R;G;Bm<char>\x1b[0m`.
-
----
-
-## 7. Complete Reference Map
-
-For detailed guides and code implementations, explore the reference files:
-
-- **[Glyph Language Guide](./references/glyph-language.md)**: Deep dive into character geometry, directional angle quantization, and anatomical vocabularies.
-- **[Math & Physics Engine](./references/math-and-physics.md)**: Mathematical formulas for logistic growth, polar rosettes, Euler harmonic waves, and inverse kinematics.
-- **[Rendering & Bloom Pipeline](./references/rendering-and-bloom.md)**: Canvas matrix rotations, dual-pass glow, touch optimization, and terminal buffer rasterizers.
-- **[Botany & Life Cycles](./references/botany-and-lifecycles.md)**: State machines, 20n plateaus, branch dependency rules, and genetic mutation models.
-- **[Minimal Canvas Plant Example](./examples/minimal-canvas-plant.html)**: Standalone single-file HTML animated ASCII blooming flower.
-- **[Terminal Botany CLI Example](./examples/terminal-tree.js)**: Standalone zero-dependency Node.js script generating organic ASCII plants in terminal standard output.
+- **[isometric-building.html](./examples/isometric-building.html)**: Interactive HTML5 Canvas isometric multi-story building complex with depth sorting and sun lighting.
+- **[three-d-spinning-cube.js](./examples/three-d-spinning-cube.js)**: Standalone zero-dependency Node.js CLI script that renders a rotating 3D shaded cube with Z-buffer and Lambertian light in terminal stdout.
+- **[landscape-terrain.html](./examples/landscape-terrain.html)**: Procedural mountain landscape with animated ocean waves, golden sunlight reflections, and weather particles.
+- **[minimal-canvas-plant.html](./examples/minimal-canvas-plant.html)**: Animated blooming ASCII flower featuring hardware screen-space bloom glow and cursor reach.
+- **[terminal-tree.js](./examples/terminal-tree.js)**: Zero-dependency Node.js CLI procedural botany generator.

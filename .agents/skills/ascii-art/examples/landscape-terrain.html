@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Modular ASCII Landscapes — Mountain Range & Reflective Water</title>
+  <style>
+    body {
+      margin: 0;
+      background: #050508;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      color: #8a8a9e;
+      overflow: hidden;
+    }
+    canvas {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9);
+      border-radius: 8px;
+    }
+    .hud {
+      margin-top: 12px;
+      font-size: 13px;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="landCanvas" width="700" height="460"></canvas>
+  <div class="hud">Multi-Octave Terrain Heightmaps • Dynamic Water Harmonics • Atmospheric Parallax</div>
+
+  <script>
+    const canvas = document.getElementById('landCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    const waterY = 310;
+    const sunX = W * 0.65;
+    const sunY = 90;
+
+    // Multi-octave pseudo-noise height function
+    function terrainHeight(x, octaveCount, baseAmp, freq, phase) {
+      let h = 0;
+      for (let o = 1; o <= octaveCount; o++) {
+        const factor = Math.pow(2, o - 1);
+        h += (baseAmp / factor) * Math.sin((x * freq * factor) + phase + o * 1.7);
+      }
+      return h;
+    }
+
+    // Weather Particles (Rain / Mist)
+    const raindrops = Array.from({ length: 60 }, () => ({
+      x: Math.random() * W,
+      y: Math.random() * waterY,
+      speed: 4 + Math.random() * 4
+    }));
+
+    function drawChar(char, x, y, color, size = 13) {
+      ctx.font = `bold ${size}px monospace`;
+      ctx.fillStyle = color;
+      ctx.fillText(char, x, y);
+    }
+
+    function render(time) {
+      ctx.fillStyle = '#070712';
+      ctx.fillRect(0, 0, W, H);
+
+      // 1. Sky & Celestial Sun
+      for (let r = 28; r >= 4; r -= 6) {
+        ctx.fillStyle = r > 16 ? 'rgba(255, 215, 64, 0.08)' : 'rgba(255, 235, 59, 0.25)';
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      drawChar('@', sunX - 4, sunY + 4, '#ffeb3b', 16);
+
+      // Ambient Clouds
+      for (let cx = 60; cx < W; cx += 180) {
+        const drift = (cx + time * 8) % (W + 100) - 50;
+        drawChar('.---.', drift, 60, '#33334d', 12);
+        drawChar('( ~~~ )', drift - 6, 72, '#444466', 12);
+      }
+
+      // 2. LAYER 1: Distant Mountain Range (Atmospheric haze, sparse dots)
+      for (let x = 0; x < W; x += 10) {
+        const h = terrainHeight(x, 3, 110, 0.003, 1.2);
+        const yTop = waterY - 140 - h;
+        for (let y = yTop; y < waterY; y += 14) {
+          const char = (y === yTop) ? '^' : ':';
+          drawChar(char, x, y, '#282846', 11);
+        }
+      }
+
+      // 3. LAYER 2: Midground Foothills (Medium density)
+      for (let x = 0; x < W; x += 10) {
+        const h = terrainHeight(x, 4, 70, 0.007, 3.8);
+        const yTop = waterY - 80 - h;
+        for (let y = yTop; y < waterY; y += 14) {
+          const char = (y === yTop) ? '/' : (x % 20 === 0) ? '*' : '~';
+          drawChar(char, x, y, '#3b4261', 12);
+        }
+      }
+
+      // 4. LAYER 3: Foreground Crags (Heavy density, sharp contrast)
+      for (let x = 0; x < W; x += 9) {
+        const h = terrainHeight(x, 4, 45, 0.012, 5.1);
+        const yTop = waterY - 30 - h;
+        for (let y = yTop; y < waterY; y += 13) {
+          const char = (y < yTop + 14) ? '^' : (x % 18 === 0) ? '#' : '%';
+          drawChar(char, x, y, '#5a628a', 13);
+        }
+      }
+
+      // 5. Water Plane & Animated Waves with Sun Reflection Column
+      for (let y = waterY; y < H; y += 11) {
+        const depthFactor = (y - waterY) / (H - waterY); // 0 at horizon, 1 at bottom
+        const charSpacing = 10 + depthFactor * 4;
+
+        for (let x = 0; x < W; x += charSpacing) {
+          const wave = Math.sin(x * 0.08 - time * 2.2) + Math.cos(y * 0.2 + time);
+          const distToSunPath = Math.abs(x - sunX);
+          const inSunPath = distToSunPath < (18 + depthFactor * 65);
+
+          let char = '~';
+          let color = '#1a233a';
+
+          if (inSunPath) {
+            if (wave > 0.8) {
+              char = '*';
+              color = '#ffeb3b'; // Golden glint
+            } else if (wave > 0.1) {
+              char = '=';
+              color = '#f6ad55';
+            } else {
+              char = '-';
+              color = '#4a5568';
+            }
+          } else {
+            if (wave > 0.6) char = '~';
+            else if (wave > 0.0) char = '-';
+            else char = '.';
+          }
+
+          drawChar(char, x, y, color, 12);
+        }
+      }
+
+      // 6. Weather Rain Particle System
+      ctx.fillStyle = '#63b3ed';
+      raindrops.forEach(drop => {
+        drop.y += drop.speed;
+        drop.x -= 0.6; // Gentle wind slant
+        if (drop.y > waterY) {
+          drop.y = 0;
+          drop.x = Math.random() * W;
+        }
+        drawChar('/', drop.x, drop.y, 'rgba(144, 205, 244, 0.6)', 10);
+      });
+    }
+
+    function animate(now) {
+      render(now * 0.001);
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
